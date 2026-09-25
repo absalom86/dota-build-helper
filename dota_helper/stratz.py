@@ -66,7 +66,7 @@ class Stratz:
         try:
             token = self.token if self.token is not None else load_token()
         except RuntimeError:
-            raise DataError("STRATZ key could not be decrypted. Save it again in Overlay & connection.") from None
+            raise DataError("Saved STRATZ key is present but unreadable. Open the helper under the Windows account that saved it; do not replace the key.") from None
         if not token:
             raise DataError("Save your STRATZ API key in Overlay & connection first.")
         body = json.dumps({'query': query, 'variables': variables or {}}, sort_keys=True).encode()

@@ -3,6 +3,12 @@ DOTA BUILD HELPER - QUICK SETUP
 Install DotaBuildHelper-Setup.exe and open Dota Build Helper.
 Python is included. No Git, terminal or source-code download is needed.
 
+UPDATING: close the helper normally and run the new installer under the same
+Windows account. Settings, keys and saved searches are retained. The key box
+stays empty intentionally; Saved key in use means you do not need to re-enter
+it. If the key is unreadable, reopen under the account that originally saved
+it. Existing profiles do not repeat first-run setup.
+
 Quick setup opens the first time; reopen it from the top of the app anytime.
 
 1. SAVE YOUR STRATZ KEY

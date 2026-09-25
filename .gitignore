@@ -12,7 +12,9 @@ build/
 !.env.example
 *.log
 stratz-key.bin
+stratz-key.bin.bak
 settings.json
+settings.json.bak
 starting-items.json
 quantity-evidence.json
 search-history.json

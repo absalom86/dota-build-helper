@@ -3,6 +3,12 @@ import ctypes
 from ctypes import wintypes
 import os
 from pathlib import Path
+from .profile import atomic_write, backup_path
+
+
+UNREADABLE_KEY = ('Your saved STRATZ key is still present, but this Windows account cannot read it. '
+                  'Close the helper and open it normally under the Windows account that saved the key. '
+                  'The existing key has not been removed or replaced.')
 
 
 class Blob(ctypes.Structure):
@@ -41,9 +47,27 @@ def save_token(token, path=None):
     if not token or len(token) > 8192 or any(c.isspace() for c in token):
         raise ValueError("Enter a valid STRATZ token.")
     path = Path(path) if path else credential_path()
+    previous = _read_saved(path)
     encrypted = _crypt(token.encode("utf-8"))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encrypted)
+    if _crypt(encrypted, decrypt=True).decode('utf-8') != token:
+        raise RuntimeError('Windows could not verify the saved key. The previous key is unchanged.')
+    if previous is not None:
+        atomic_write(backup_path(path), previous[0])
+    atomic_write(path, encrypted)
+
+
+def _read_saved(path):
+    for candidate in (path, backup_path(path)):
+        try:
+            encrypted = candidate.read_bytes()
+            token = _crypt(encrypted, decrypt=True).decode('utf-8')
+            if token:
+                return encrypted, token
+        except (OSError, RuntimeError, UnicodeError):
+            pass
+    if path.exists() or backup_path(path).exists():
+        raise RuntimeError(UNREADABLE_KEY)
+    return None
 
 
 def load_token():
@@ -51,6 +75,5 @@ def load_token():
     if token:
         return token
     path = credential_path()
-    if not path.exists():
-        return ""
-    return _crypt(path.read_bytes(), decrypt=True).decode("utf-8")
+    saved = _read_saved(path)
+    return saved[1] if saved is not None else ''

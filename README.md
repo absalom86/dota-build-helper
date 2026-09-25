@@ -71,6 +71,8 @@ See the [user guide](docs/USER_GUIDE.md) for overlay controls, draft behavior, s
 
 Settings, encrypted credentials, cache and saved searches live in `%LOCALAPPDATA%\DotaBuildHelper` for the installed/portable app. `DOTA_HELPER_HOME` can override that folder. Do not share its contents. Optional OCR requires a separate Tesseract installation and calibration; it is not required for manual use or game-state integration.
 
+**Updating:** close the helper normally and run the new installer under the same Windows account. Your key, settings and saved searches stay in the shared user-data folder; replacing the portable EXE also keeps them. Existing profiles do not repeat first-run setup. The key field stays empty intentionally and shows **Saved key in use**; you do not need to re-enter it. Settings and replaced credentials have last-good backups. If the key is present but unreadable, reopen the app under the Windows account that saved it—do not replace it just because another account cannot decrypt it. Only one helper can open the same profile at a time.
+
 Patch data is bundled and can lag behind Dota updates. Item timings are examples, not deadlines. Missing source counts, exact skill levels, live draft delivery and current-map camp timings remain limited by available data.
 
 <details>

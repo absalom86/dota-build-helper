@@ -14,6 +14,7 @@ def run(report_path):
     from .draft import rank_picks
     from .providers import LOCAL
     from . import guides, invoker, starting_items
+    from .credentials import load_token
     import mss
 
     report = Path(report_path).resolve()
@@ -77,6 +78,7 @@ def run(report_path):
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
                           invoker_spells=len(invoker.SPELLS), shop_guide_export=True, overlay_fit=True,
                           quantity_provenance=True, independent_telemetry=True, quick_setup=True,
+                          credential_available=bool(load_token()),
                           data_directory=str(LOCAL), window_visible=window.isVisible())
         except Exception as exc:
             result.update(ok=False, error=f"{type(exc).__name__}: {exc}")

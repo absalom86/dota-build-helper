@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, QAbstractNativeEventFilter, QRect, QPoint, QUrl
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, QAbstractNativeEventFilter, QRect, QPoint, QUrl, QLockFile
 from PySide6.QtGui import QColor, QPainter, QPixmap, QImage, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -32,6 +32,7 @@ from . import guides, invoker
 from .overlay import Overlay, route_identity, purchase_summary
 from .lane_timers import LaneTimers
 from .providers import LOCAL, OpenDota, Demo
+from . import profile
 from .windows import dota_active, register_hotkey, unregister_hotkey, IS_WINDOWS
 
 
@@ -162,10 +163,8 @@ class MainWindow(QMainWindow):
         self.settings_file = LOCAL / "settings.json"
         self.history = SearchHistory(LOCAL)
         self.history_key = None
-        try:
-            self.settings = json.loads(self.settings_file.read_text())
-        except (OSError, ValueError):
-            self.settings = {}
+        self.settings = profile.load_settings(self.settings_file)
+        self.existing_profile = bool(self.settings)
         self.session = Session(hero_id=self.settings.get("hero_id", 1))
         self.routes = []
         self.services_started = start_services
@@ -270,7 +269,7 @@ class MainWindow(QMainWindow):
         self.save_settings()
         if start_services and not demo:
             QTimer.singleShot(0,self.draft.refresh_meta)
-            if not self.settings.get('quick_setup_seen'):
+            if not self.existing_profile and not self.settings.get('quick_setup_seen'):
                 QTimer.singleShot(0,self.quick_setup)
         if demo:
             self.draft.meta_active=False
@@ -774,8 +773,8 @@ class MainWindow(QMainWindow):
             self.draft.refresh_meta()
             self.stratz_key.clear()
             QMessageBox.information(self, "STRATZ", "API key saved with Windows encryption.")
-        except (ValueError, RuntimeError, OSError):
-            QMessageBox.warning(self, "STRATZ", "Could not save the key. Check the value and Windows account access.")
+        except (ValueError, RuntimeError, OSError) as error:
+            QMessageBox.warning(self, "STRATZ", str(error))
 
     def browse_d2pt(self):
         from urllib.parse import quote
@@ -1598,9 +1597,7 @@ class MainWindow(QMainWindow):
                                  overlay_x=self.overlay.x(), overlay_y=self.overlay.y(),
                                  overlay_w=self.overlay.preferred_width, overlay_h=self.overlay.height(),
                                  overlay_font=self.overlay.font_size, supply_minutes=self.supply_minutes.value())
-        temp = self.settings_file.with_suffix(".tmp")
-        temp.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
-        temp.replace(self.settings_file)
+        profile.save_settings(self.settings_file, self.settings)
 
     def closeEvent(self, event):
         self.closing = True
@@ -1635,6 +1632,21 @@ def main():
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Dota Build Helper")
     app.setWindowIcon(QIcon(str(Path(__file__).parent / 'data' / 'app-icon.ico')))
+    # Check account-bound credentials before a wrong-account process can rewrite settings.
+    from .credentials import load_token
+    try:
+        load_token()
+        profile.load_settings(LOCAL / 'settings.json')
+    except (RuntimeError, OSError) as error:
+        QMessageBox.critical(None, 'Saved profile unavailable', str(error))
+        return 1
+    LOCAL.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(LOCAL / 'helper.lock'))
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(0):
+        QMessageBox.information(None, 'Dota Build Helper',
+                                'The helper is already open for this profile. Use the existing window.')
+        return 0
     window = MainWindow(demo=args.demo)
     window.show()
     return app.exec()

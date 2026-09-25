@@ -42,8 +42,12 @@ class SetupDialog(QDialog):
         try:
             saved = bool(credentials.load_token())
             key_text = 'Key available. Leave this field empty to keep it.' if saved else 'Get your key from STRATZ, or use one privately shared with permission.'
+            if saved:
+                self.key.setPlaceholderText('Saved key in use — no need to enter it again')
+                self.save_key.setText('Replace saved key')
         except (OSError, RuntimeError, UnicodeError):
-            key_text = 'Saved key could not be read. Paste a replacement.'
+            key_text = credentials.UNREADABLE_KEY
+            self.save_key.setEnabled(False)
         self.key_status = note(key_text)
 
         note('2. Connect Dota')
@@ -85,6 +89,8 @@ class SetupDialog(QDialog):
             self.key_status.setText(str(error))
             return
         self.key.clear()
+        self.key.setPlaceholderText('Saved key in use — no need to enter it again')
+        self.save_key.setText('Replace saved key')
         self.key_status.setText('Key saved securely for your Windows account. API access is checked on lookup.')
         self.owner.draft.refresh_meta()
 

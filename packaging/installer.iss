@@ -1,5 +1,8 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.2"
+  #define AppVersion "0.1.3"
+#endif
+#ifndef AppExecutable
+  #define AppExecutable "..\dist\DotaBuildHelper.exe"
 #endif
 [Setup]
 AppId={{DD97C321-37AE-4B80-B47F-385DAFC8230C}
@@ -27,7 +30,7 @@ InfoAfterFile=START-HERE.txt
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
-Source: "..\dist\DotaBuildHelper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#AppExecutable}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "TESTING.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "START-HERE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "THIRD-PARTY.txt"; DestDir: "{app}"; Flags: ignoreversion
