@@ -55,10 +55,28 @@ def run(report_path):
                 'items': {'slot0': {'name': 'item_tango', 'charges': 2}}})
             assert window.session.inventory['tango'] == 1 and window.session.inventory_charges['tango'] == 2
             assert window.session.field_status('inventory') == 'fresh' and window.session.field_status('skills') == 'missing'
+            from .setup_ui import SetupDialog
+            from . import game_setup
+            # Only a disposable fixture is written; never configure or launch the real game.
+            setup_root = LOCAL / 'setup-fixture'
+            fixture_exe = setup_root / 'game' / 'bin' / 'win64' / 'dota2.exe'
+            fixture_exe.parent.mkdir(parents=True, exist_ok=True)
+            fixture_exe.write_bytes(b'offline setup fixture; not executable')
+            discover = game_setup.dota_directories
+            try:
+                game_setup.dota_directories = lambda: [setup_root]
+                window.settings.pop('dota_directory', None)
+                setup = SetupDialog(window)
+                setup.connect_game()
+                assert game_setup.config_ready(setup_root, window.settings['gsi_token'])
+                assert not setup.launch_button.isEnabled()  # no live receiver in offline test
+                setup.close()
+            finally:
+                game_setup.dota_directories = discover
             result.update(ok=True, frozen=bool(getattr(sys, "frozen", False)), heroes=len(HEROES),
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
                           invoker_spells=len(invoker.SPELLS), shop_guide_export=True, overlay_fit=True,
-                          quantity_provenance=True, independent_telemetry=True,
+                          quantity_provenance=True, independent_telemetry=True, quick_setup=True,
                           data_directory=str(LOCAL), window_visible=window.isVisible())
         except Exception as exc:
             result.update(ok=False, error=f"{type(exc).__name__}: {exc}")

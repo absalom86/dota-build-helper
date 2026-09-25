@@ -1,32 +1,42 @@
 DOTA BUILD HELPER - QUICK SETUP
 
-Install and open the app. Python is included.
+Install DotaBuildHelper-Setup.exe and open Dota Build Helper.
+Python is included. No Git, terminal or source-code download is needed.
 
-1. ADD A STRATZ KEY
-Get a key at https://stratz.com/api, or use one privately shared by a friend
-with their permission. Shared keys share limits. In Overlay & connection,
-paste it under STRATZ connection and click Save STRATZ key.
-No key is included with the installer.
+Quick setup opens the first time; reopen it from the top of the app anytime.
 
-2. CONNECT DOTA
-Click Export Dota game-state config in Overlay & connection.
-In Steam, right-click Dota 2 > Manage > Browse local files. Put the exported
-.cfg file in game\dota\cfg\gamestate_integration (create the folder if needed).
-Export from YOUR app; a friend's configuration will not use your connection.
+1. SAVE YOUR STRATZ KEY
+Click Get a key to open STRATZ. Obtain your token, paste it, then Save key.
+A friend can privately share a key with permission, subject to STRATZ's terms.
+Shared keys share limits. No key is included. Existing saved keys are kept.
 
-3. ADD THE STEAM LAUNCH OPTION
-Steam > Dota 2 > Properties > General > Launch Options:
+2. CLICK CONNECT DOTA
+The app locates Dota in Steam's libraries and installs the connection file.
+Choose a folder only if automatic discovery cannot find a single installation.
+The folder is remembered; existing helper configs are backed up.
 
-    -gamestateintegration
-
-Keep existing options, separated by spaces. Fully close and restart Dota.
-The installer does not change game files or launch options for you.
+3. CLICK LAUNCH DOTA
+Close Dota first if it is running. This button starts Dota through Steam with
+-gamestateintegration included for that launch. Use it each time, or add that
+option once in Steam > Dota 2 > Properties > General > Launch Options if you
+prefer Steam's Play button. Existing Steam launch settings are not modified.
 
 4. TRY A BOT MATCH
-Keep the helper open and select your position (1-5). Confirmed game data can
-select your hero; manual selection and Find builds also work. Click a match
-row to follow its build. Draft picks fill when Dota supplies them; otherwise
-enter them manually. Actual game-data delivery needs this check on your PC.
+Keep the helper open, select your position (1-5) and lock a hero in Dota.
+Detected heroes load builds automatically. The first build is selected; click
+another match row or change hero/position anytime. Find builds is the manual
+fallback. Check live clock, inventory and skill status in Overlay & connection.
+Config installation or a launch request alone does not confirm game delivery.
+
+Keep the defaults initially. OCR, calibration, repositioning and shop-guide
+export are optional. Borderless/windowed fullscreen is the intended mode.
+
+MANUAL CONNECTION FALLBACK
+If Connect Dota fails, use Overlay & connection > Export Dota game-state config.
+Save it to <Dota installation>\game\dota\cfg\gamestate_integration.
+Locate Dota through Steam > Manage > Browse local files. Create the final folder
+if missing. Export from YOUR app; do not share the private connection token.
+Add -gamestateintegration in Steam launch options and fully restart Dota.
 
 EARLY BUILDS AND SWAPS
 If Dota supplies your local hero during draft, three stable updates preload

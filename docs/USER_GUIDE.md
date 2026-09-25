@@ -50,12 +50,13 @@ Matchup responses are cached for six hours and read immediately, with visibly la
 
 ## Connect Dota
 
-1. In **Overlay & connection**, export the game-state configuration.
-2. Copy that file into `<Dota install>/game/dota/cfg/gamestate_integration/` (create that folder if needed).
-3. In Steam's Dota launch options add `-gamestateintegration`, then restart Dota.
-4. Enter a bot match and check that the connection status changes from waiting to connected.
+Use **Quick setup** at the top of the app. Save a STRATZ key, click **Connect Dota** to automatically find the installation and write the connection file, then **Launch Dota**. Close Dota before launching. The launch button supplies `-gamestateintegration` each time; it does not edit Steam's saved launch options. If you use Steam's Play button, add that option in Steam once. Test the connection in a bot match.
 
-The receiver binds only to `127.0.0.1:38765` and checks a generated token. The token lives in the app's local settings; keep the exported configuration local. No config is installed into your game automatically. Do not run multiple copies on the same port.
+A folder prompt appears only when discovery finds no installation or multiple installations. The chosen folder is remembered. The app validates the Dota executable before writing its own config and backs up a previous helper config. Permission errors are shown so you can use the manual export fallback.
+
+For manual setup, export the config under **Overlay & connection**, put it in `<Dota install>/game/dota/cfg/gamestate_integration/`, add `-gamestateintegration` in Steam and fully restart Dota.
+
+The receiver binds only to `127.0.0.1:38765` and checks a generated token. The token lives in the app's local settings; keep the exported configuration local. Quick setup installs the config when you click Connect Dota. Do not run multiple copies on the same port.
 
 Local-player GSI can confirm a hero in strategy/pregame/in-progress phases, provide the game clock and update inventory/skills. Hero-selection-phase messages are not treated as proof of lock-in. Spectator-shaped payloads are ignored. These integrations are tested with fixtures and a local HTTP round-trip; actual Dota delivery remains to be tested.
 

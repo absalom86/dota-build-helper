@@ -222,6 +222,7 @@ class MainWindow(QMainWindow):
         app_title.setWordWrap(False)
         header.addWidget(app_title)
         header.addStretch()
+        header.addWidget(button('Quick setup', self.quick_setup))
         self.connection_summary = label('Game data · waiting for Dota', 'muted')
         self.connection_summary.setWordWrap(False)
         header.addWidget(self.connection_summary)
@@ -269,12 +270,20 @@ class MainWindow(QMainWindow):
         self.save_settings()
         if start_services and not demo:
             QTimer.singleShot(0,self.draft.refresh_meta)
+            if not self.settings.get('quick_setup_seen'):
+                QTimer.singleShot(0,self.quick_setup)
         if demo:
             self.draft.meta_active=False
         if demo:
             self.hero.setCurrentIndex(self.hero.findData(1))
             self.role.setCurrentIndex(self.role.findData(1))
             self.fetch()
+
+    def quick_setup(self):
+        from .setup_ui import SetupDialog
+        self.settings['quick_setup_seen']=True
+        self.save_settings()
+        SetupDialog(self).exec()
 
     def build_page(self, demo):
         from PySide6.QtWidgets import QSizePolicy

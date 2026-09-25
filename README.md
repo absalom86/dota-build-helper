@@ -6,58 +6,42 @@ A Windows companion for Dota 2: select a hero and position, compare builds from 
 
 ## Quick setup for players
 
-### 1. Install the app
+**Use [DotaBuildHelper-Setup.exe](https://github.com/absalom86/dota-build-helper/releases/latest/download/DotaBuildHelper-Setup.exe).** Run the installer and open **Dota Build Helper**. Windows 10/11 x64 is required. You do **not** need Python, Git, source code, or a terminal.
 
-Download **DotaBuildHelper-Setup.exe** from [Releases](https://github.com/absalom86/dota-build-helper/releases/latest), run it, and open **Dota Build Helper** from the Start menu. Python and dependencies are included; you do not need to install them separately. Windows 10/11, 64-bit is required.
+The app opens **Quick setup** on first launch. You can reopen it from the button at the top of the app.
 
-A portable **DotaBuildHelper.exe** is also available. Releases are unsigned, so Windows may show an unknown-publisher warning. Download from this repository; each release includes SHA-256 checksums.
+1. **Save your STRATZ key.** Click **Get a key**, sign in to STRATZ and obtain an API token, then paste it and click **Save key**. A key privately shared with permission can also be used, subject to STRATZ's terms. No key is included; shared keys share limits. Existing saved keys are kept.
+2. **Click Connect Dota.** The app finds Dota in your Steam libraries and installs its connection file automatically. No manual folder copying is needed for a detected installation. If several installations exist, choose one; if none is found, select the Dota installation folder once. The choice is remembered.
+3. **Click Launch Dota.** Close Dota first if it is already running. This starts it through Steam with **`-gamestateintegration`** included. Use the helper's launch button each time; it does not permanently change Steam's launch settings.
 
-### 2. Add your STRATZ API key
+Keep the helper open, choose your position **1–5** in **Builds**, and start a bot match. Detected heroes load builds automatically; the first available build is selected. You can change hero, position or build anytime. Manual hero/position changes stick for the match; **Resume detection** switches back to automatic selection.
 
-1. Open [STRATZ API](https://stratz.com/api), sign in, and obtain an API token through your account's API access page.
-2. In the helper, open **Overlay & connection → STRATZ connection**.
-3. Paste the token and click **Save STRATZ key**.
+**That's the normal setup.** Keep the default overlay and detection settings initially. OCR installation, screen calibration, overlay repositioning and shop-guide export are optional. Draft previews are labelled unconfirmed until strategy-time data arrives; missing draft data still needs manual hero selection. Role recognition is experimental, so selecting your position is the simplest starting point.
 
-No key comes with the app. Use your own token, or one privately shared by a friend with their permission and subject to STRATZ's terms. Shared tokens share request limits. Keep tokens out of screenshots, GitHub issues and source files. The app stores the key encrypted for your Windows user account.
+The overlay appears below the top-right stats when Dota is foreground. Use borderless/windowed fullscreen if it is hidden. Confirm clock, inventory and skill updates under **Overlay & connection** in the bot match before relying on them. A launch request or installed config alone does not prove that Dota is sending data.
 
-### 3. Export your game-state config
+<details>
+<summary>Prefer Steam's Play button, need manual setup, or want the portable EXE?</summary>
 
-1. In **Overlay & connection**, click **Export Dota game-state config…**.
-2. In Steam, right-click **Dota 2 → Manage → Browse local files**.
-3. Put the exported `gamestate_integration_build_helper.cfg` in:
-
-   ```text
-   <Dota installation>\game\dota\cfg\gamestate_integration\
-   ```
-
-   Create `gamestate_integration` if it does not exist. The filename must keep its `.cfg` extension.
-
-Export the config from **your own helper installation**: it contains a local connection token. Do not reuse a friend's config or post it publicly. The installer does not edit Dota's files for you.
-
-### 4. Add the Steam launch option
-
-In **Steam → Dota 2 → Properties → General → Launch Options**, add:
+To launch directly from Steam, add this once under **Dota 2 → Properties → General → Launch Options**:
 
 ```text
 -gamestateintegration
 ```
 
-Keep any existing launch options, separated by spaces. **Fully close and restart Dota after adding the option and config.**
+Keep existing options, separated by spaces, then fully restart Dota. The helper's **Launch Dota** button already supplies this option for that launch.
 
-### 5. Test in a bot match
+If automatic connection-file installation fails, use **Overlay & connection → Export Dota game-state config…** and save `gamestate_integration_build_helper.cfg` into:
 
-1. Keep the helper open. Choose your position **1–5** in **Builds**.
-2. Launch Dota in **borderless/windowed fullscreen** and start a bot match. A live matchmaking game is not required.
-3. Lock in a hero. If Dota supplies your local hero during draft, three matching updates over at least two seconds preload a **draft preview**. This is not proof of lock-in; strategy-time data confirms the hero before play starts. Automatic data availability varies, so manual selection always works.
-4. Click **Find builds**, then choose a match row. The first available build is selected automatically.
-5. Check **Overlay & connection**: clock, inventory and skills each show their own fresh/stale/missing status.
-6. Enable **Preview / reposition** to place the overlay, then disable preview for normal play. Default visibility shortcut: **Ctrl+F8**.
+```text
+<Dota installation>\game\dota\cfg\gamestate_integration\
+```
 
-The overlay normally appears below the top-right game stats. It shows starting items through 1:00, early parts through 5:00, and laning supplies through 10:00 by default. The full major-item build, next skill and talent choices stay visible. Width, text size and supply duration are adjustable.
+Find the installation via **Steam → Dota 2 → Manage → Browse local files**. Create the final folder if needed. Export from your own helper: the config contains a private local connection token. The app backs up an existing helper config before replacing it and leaves other apps' configs alone.
 
-**Position detection:** open **Overlay & connection → Draft role recognition**, install Tesseract with English data, calibrate a tight crop around **your assigned-role text**, and enable recognition. Three confident matching reads during draft select the position. This is experimental screen recognition, not a confirmed assignment supplied by GSI. Without it, the app keeps your saved position. Bot/unranked games may not assign a role.
+The [portable DotaBuildHelper.exe](https://github.com/absalom86/dota-build-helper/releases/latest/download/DotaBuildHelper.exe) includes the same Quick setup flow. The installer is recommended for its Start menu shortcut and bundled instructions. Downloads are unsigned; releases include SHA-256 checksums.
 
-**Swaps and overrides:** change either dropdown in **Builds** whenever you swap heroes or positions. The helper reloads builds and preserves each manual choice for this match. **Resume detection** releases both overrides; a new detected match also clears them. Automatic mode follows hero swaps reported by Dota. **More options** lets you disable draft previews or automatic hero selection. Preview lookups are limited to one per ten seconds and reuse saved searches.
+</details>
 
 **Try without Dota or an API key:** choose **Offline demo**, **Anti-Mage**, position **1**, then **Find builds**. Demo builds are synthetic test data.
 
@@ -75,7 +59,7 @@ See the [user guide](docs/USER_GUIDE.md) for overlay controls, draft behavior, s
 
 | Problem | What to check |
 | --- | --- |
-| No game connection | Export the config from this installation, check its folder/extension, add `-gamestateintegration`, then restart Dota. Run only one helper instance. |
+| No game connection | Open Quick setup, reconnect/repair Dota, close Dota and use Launch Dota. Run only one helper instance. If using Steam Play, add the launch option there once. |
 | Hero not detected during draft | Wait for a confirmed pick/strategy phase, or choose the hero manually. Draft field delivery varies. |
 | Clock works but items/skills do not | Check their separate status indicators. A working clock does not prove those fields arrived. |
 | Overlay hidden | Enable the overlay; try borderless fullscreen and Preview / reposition; check Ctrl+F8. Exclusive fullscreen is not verified. |
@@ -88,6 +72,9 @@ See the [user guide](docs/USER_GUIDE.md) for overlay controls, draft behavior, s
 Settings, encrypted credentials, cache and saved searches live in `%LOCALAPPDATA%\DotaBuildHelper` for the installed/portable app. `DOTA_HELPER_HOME` can override that folder. Do not share its contents. Optional OCR requires a separate Tesseract installation and calibration; it is not required for manual use or game-state integration.
 
 Patch data is bundled and can lag behind Dota updates. Item timings are examples, not deadlines. Missing source counts, exact skill levels, live draft delivery and current-map camp timings remain limited by available data.
+
+<details>
+<summary>For developers: run from source, test and build</summary>
 
 ## Run from source
 
@@ -127,6 +114,8 @@ Development data stays in `.local/`, which is ignored by Git. For terminal diagn
 ```
 
 The test suite runs without a STRATZ key or Dota. `requirements.lock.txt` records the tested dependency versions. To rebuild the installer, install **Inno Setup 6** and run `build-installer.ps1`; pass `-Compiler 'C:\path\to\ISCC.exe'` if needed. Close the helper before overwriting its executable. Build output belongs in `dist/`, not Git; publish installers as release assets.
+
+</details>
 
 ## Repository access
 

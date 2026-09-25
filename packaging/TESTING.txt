@@ -12,7 +12,7 @@ Check the fit message and ensure the full major-item build and talent list are v
 is needed, move the overlay up or reduce text size before starting Dota.
 
 2. REAL BUILDS
-Use your own STRATZ API key in Overlay & connection. No key is included.
+Use Quick setup to save your STRATZ API key. No key is included.
 Select your hero and position, then Recommended builds > Find builds.
 Before locking a hero, the overlay automatically shows role-based top win rates
 and most-played heroes. These are recent seven-day Immortal stats; current-patch
@@ -57,10 +57,10 @@ The helper does not switch the in-game guide for you. Actual local guide
 visibility and purchases still need this in-game check.
 
 3. IN-GAME TEST
-In Overlay & connection, export the game-state integration configuration.
-Copy it to your Steam library's:
-steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration\
-Add -gamestateintegration to Dota's Steam launch options, then restart Dota.
+Open Quick setup, click Connect Dota, close Dota if running, then Launch Dota.
+This installs the connection file and supplies -gamestateintegration for the
+launch. If using Steam's Play button, add the option there once instead.
+The manual export fallback is described in START-HERE.txt.
 Start a bot match. Choose the correct position in the app. Confirmed hero
 detection can begin at strategy time or pregame. Check connection diagnostics.
 Hero, clock, inventory, charges and skills must each report their own freshness
