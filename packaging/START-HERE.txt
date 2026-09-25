@@ -1,0 +1,69 @@
+DOTA BUILD HELPER - QUICK SETUP
+
+Install and open the app. Python is included.
+
+1. ADD A STRATZ KEY
+Get a key at https://stratz.com/api, or use one privately shared by a friend
+with their permission. Shared keys share limits. In Overlay & connection,
+paste it under STRATZ connection and click Save STRATZ key.
+No key is included with the installer.
+
+2. CONNECT DOTA
+Click Export Dota game-state config in Overlay & connection.
+In Steam, right-click Dota 2 > Manage > Browse local files. Put the exported
+.cfg file in game\dota\cfg\gamestate_integration (create the folder if needed).
+Export from YOUR app; a friend's configuration will not use your connection.
+
+3. ADD THE STEAM LAUNCH OPTION
+Steam > Dota 2 > Properties > General > Launch Options:
+
+    -gamestateintegration
+
+Keep existing options, separated by spaces. Fully close and restart Dota.
+The installer does not change game files or launch options for you.
+
+4. TRY A BOT MATCH
+Keep the helper open and select your position (1-5). Confirmed game data can
+select your hero; manual selection and Find builds also work. Click a match
+row to follow its build. Draft picks fill when Dota supplies them; otherwise
+enter them manually. Actual game-data delivery needs this check on your PC.
+
+BUILDS AND QUANTITIES
+Patch confidence comes first, then premier events, other tournaments, pro
+players and pubs, newest first within each group. This does not rank actual
+team strength. The app's saved patch list may lag behind Dota updates.
+The selected buy labels counts recorded, estimated or corrected. Edit quantities
+saves a correction; Reset to source removes it. Tango counts are packs, not
+remaining charges. The labelled two-branch estimate applies only to STRATZ.
+Background checks compare the same player's STRATZ and OpenDota game when
+identity is available. Check quantities lets you review mismatches; current
+counts stay unless you accept the alternative. Older saved builds may ask for
+a fresh lookup. Agreement still does not prove every purchase was captured.
+
+OVERLAY
+Enable Preview / reposition in Overlay & connection. Check the fit message;
+move it or adjust width/text size if needed. Short screens use wider columns.
+Starting buy hides at 1:00; early parts at 5:00; laning supplies at 10:00
+(adjustable). The full major-item build stays visible. Try borderless window
+mode if it is hidden. Pull/stack timings are approximate.
+Invoker's ten recipes use default Q/W/E, then R to Invoke and D/F to cast.
+
+OPTIONAL: DOTA SHOP GUIDE
+Review the buy, then click Export to Dota shop. Save in:
+Steam\userdata\<your account>\570\remote\guides
+The app remembers your chosen account folder. Restart Dota after your game,
+then select the Helper guide in that hero's shop. Quantities, item timings and
+skill/talent notes are included. Shop guide status shows up to date, changed
+or missing; export again when needed. It does not confirm Dota loaded the file
+or switch your in-game guide. Check actual shop loading on your PC.
+
+IF SOMETHING IS MISSING
+Diagnostics track hero, clock, inventory, charges and skills separately.
+A fresh clock does not mean item/skill data arrived. Check the config and launch
+option, or re-export the config after an update. HTTP 429 means wait for the API
+limit to reset; saved builds remain usable. Offline demo needs no key or game.
+Optional draft-role recognition requires separate Tesseract English OCR and
+calibration; manual position selection always works.
+
+Find this again in Start > Dota Build Helper > Quick setup. See the Testing guide
+for detailed checks. Setup is incomplete until the bot-game checks pass.

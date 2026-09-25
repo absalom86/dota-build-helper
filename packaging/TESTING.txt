@@ -1,0 +1,104 @@
+DOTA BUILD HELPER - TEST BUILD
+Windows 10/11, 64-bit. Python is included; no Python installation is needed.
+
+1. FIRST TEST (NO DOTA OR API KEY NEEDED)
+Open Start > Dota Build Helper > Offline demo.
+Select different example builds. In Overlay & connection, enable the overlay
+preview to check its layout. Demo recommendations are synthetic test data.
+Try preferred widths from 270-600 pixels and text sizes from 11-16 pixels.
+Height should fit the content. On short screens it can widen and use columns,
+with a three-column fallback for crowded pregame views and no nested scrolling.
+Check the fit message and ensure the full major-item build and talent list are visible. If more room
+is needed, move the overlay up or reduce text size before starting Dota.
+
+2. REAL BUILDS
+Use your own STRATZ API key in Overlay & connection. No key is included.
+Select your hero and position, then Recommended builds > Find builds.
+Before locking a hero, the overlay automatically shows role-based top win rates
+and most-played heroes. These are recent seven-day Immortal stats; current-patch
+identity is unverified because the provider's patch directory is stale.
+Check patch labels: known current patch comes before unknown/conflicting patch,
+then known older patch. Within each group, premier events precede other
+tournaments, pro-player games and high-ranked pubs, newest first in each group.
+This is based on known event/player categories, not measured team strength.
+Current means the patch version known to this app, which may lag behind Dota;
+it is not a fresh check for the latest game patch.
+Click a match to follow its item timings, skill sequence and recorded talents.
+The compact Builds page uses that match list as the selector. Check that the
+selected row's starting-buy preview and full purchase history update together.
+Choose a saved search to open it instantly. Find builds checks for newer results
+and becomes Cancel during a search. More options contains Follow this game,
+Browse D2PT and New match.
+Below the selected buy, use Edit quantities, Check quantities or Export to Dota shop.
+Check that each starting item is labelled recorded, estimated or corrected.
+Tango quantities are packs; charges received during play are a separate count.
+Try a known correction, reopen the build, then use Reset to source. Raw purchase
+records should remain unchanged. The labelled two-branch fallback applies only
+to otherwise uncorrected STRATZ builds.
+
+For a selected STRATZ game, a background check can compare the same player's
+OpenDota purchase log. It must not delay the first displayed builds or change
+counts automatically. Check quantities lets you review differing counts: No
+keeps the current buy; Yes saves the offered counts as a correction. A missing
+player identity asks for a fresh lookup. Source errors or incomplete logs leave
+the current buy usable. Matching logs do not prove a complete starting inventory.
+
+Export to Dota shop saves the selected route as a .build file
+in Steam/userdata/<account>/570/remote/guides. Restart Dota, then select the
+Helper guide in that hero's shop. Check repeated starting items, item tooltips,
+the first-ten-minutes supplies section and skill/talent notes. Saved quantity
+corrections should export too; estimated branches must remain labelled.
+Unknown source quantities are not recovered by export alone. Use Edit quantities
+for a known correction, export again and check the updated guide.
+The chosen account folder should be remembered. The Shop guide status should
+show up to date after export, changed after editing quantities, and missing if
+you move the file. Up to date confirms the file, not Dota's active guide.
+The helper does not switch the in-game guide for you. Actual local guide
+visibility and purchases still need this in-game check.
+
+3. IN-GAME TEST
+In Overlay & connection, export the game-state integration configuration.
+Copy it to your Steam library's:
+steamapps\common\dota 2 beta\game\dota\cfg\gamestate_integration\
+Add -gamestateintegration to Dota's Steam launch options, then restart Dota.
+Start a bot match. Choose the correct position in the app. Confirmed hero
+detection can begin at strategy time or pregame. Check connection diagnostics.
+Hero, clock, inventory, charges and skills must each report their own freshness
+and last-received age. Buy an item and learn a skill; check the relevant updates.
+A fresh clock must not imply fresh inventory or skills. Missing or stale item
+data must not be treated as an empty inventory. Remaining charges are not the
+number of starting packs bought. Actual delivery needs this live check even
+though the app's handling has been tested offline.
+Use borderless windowed mode if the overlay is not visible over fullscreen.
+
+The overlay shows the full major-item build, timings, next skill and talents.
+Check the starting-buy quantities and that the card disappears at 1:00.
+Early components should disappear at 5:00. Consumables use a separate laning
+supplies section until 10:00 by default. Change Laning supplies until in settings
+to test another cutoff from 5-15 minutes. Later wards and recipes stay hidden.
+The full major-item build should remain visible at every cutoff. Compact pull
+and stack cues should show the selected role's camp and hold when the clock is
+paused or stale. Their timing is approximate; camp availability is unknown.
+The full purchase log stays in the app. See START-HERE.txt for setup steps.
+Exact talent/skill hero levels and current-patch certification are unavailable.
+For Invoker, verify all ten orb recipes appear in the overlay, with R to Invoke
+and D/F to cast from the displayed spell slot (default keys). Check all five
+paired rows, or all ten rows beside the build in the wider split layout.
+Nothing should require scrolling during play. The reference should appear
+without waiting for a build lookup and hide for other heroes.
+Confirm overlay visibility, position, readability and click-through in your
+actual Dota configuration; preview checks do not verify exclusive fullscreen.
+API shortages/rate limits may return fewer games; saved results remain available.
+
+4. REPORT A PROBLEM
+Send the hero/position, selected match ID, what you expected, what happened,
+and a screenshot of the relevant view or connection diagnostics.
+Never send your API key or stratz-key.bin file.
+
+Settings/cache are stored in %LOCALAPPDATA%\DotaBuildHelper.
+Uninstall through Windows Settings > Apps > Dota Build Helper.
+Uninstall preserves settings and saved searches for a future reinstall.
+
+This is an unsigned private test build. Windows may show a publisher/reputation
+warning. Only run the installer received directly from the person testing it
+with you. No game files or launch options are changed by the installer.
