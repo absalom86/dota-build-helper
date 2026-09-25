@@ -1,4 +1,4 @@
-param([string]$Compiler = '', [string]$Version = '0.1.0', [switch]$RebuildExe)
+param([string]$Compiler = '', [string]$Version = '0.1.1', [switch]$RebuildExe)
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 if ($RebuildExe) { & .\build-exe.ps1 }

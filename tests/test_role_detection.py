@@ -14,6 +14,7 @@ def test_manual_override_blocks_pending_role_result(tmp_path,monkeypatch):
     monkeypatch.setattr('dota_helper.app.LOCAL',tmp_path)
     monkeypatch.setattr('dota_helper.app.dota_active',lambda:True)
     w=MainWindow(start_services=False)
+    w.fetch=lambda:None
     w.settings['role_region']={'left':0,'top':0,'width':100,'height':30}
     w.role_ocr.setChecked(True)
     w.draft_phase=True

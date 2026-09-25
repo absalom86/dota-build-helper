@@ -48,12 +48,16 @@ Keep any existing launch options, separated by spaces. **Fully close and restart
 
 1. Keep the helper open. Choose your position **1–5** in **Builds**.
 2. Launch Dota in **borderless/windowed fullscreen** and start a bot match. A live matchmaking game is not required.
-3. Lock in a hero. Confirmed game-state data can select your hero and load builds. During draft, automatic data availability varies; manual hero/position selection always works.
+3. Lock in a hero. If Dota supplies your local hero during draft, three matching updates over at least two seconds preload a **draft preview**. This is not proof of lock-in; strategy-time data confirms the hero before play starts. Automatic data availability varies, so manual selection always works.
 4. Click **Find builds**, then choose a match row. The first available build is selected automatically.
 5. Check **Overlay & connection**: clock, inventory and skills each show their own fresh/stale/missing status.
 6. Enable **Preview / reposition** to place the overlay, then disable preview for normal play. Default visibility shortcut: **Ctrl+F8**.
 
 The overlay normally appears below the top-right game stats. It shows starting items through 1:00, early parts through 5:00, and laning supplies through 10:00 by default. The full major-item build, next skill and talent choices stay visible. Width, text size and supply duration are adjustable.
+
+**Position detection:** open **Overlay & connection → Draft role recognition**, install Tesseract with English data, calibrate a tight crop around **your assigned-role text**, and enable recognition. Three confident matching reads during draft select the position. This is experimental screen recognition, not a confirmed assignment supplied by GSI. Without it, the app keeps your saved position. Bot/unranked games may not assign a role.
+
+**Swaps and overrides:** change either dropdown in **Builds** whenever you swap heroes or positions. The helper reloads builds and preserves each manual choice for this match. **Resume detection** releases both overrides; a new detected match also clears them. Automatic mode follows hero swaps reported by Dota. **More options** lets you disable draft previews or automatic hero selection. Preview lookups are limited to one per ten seconds and reuse saved searches.
 
 **Try without Dota or an API key:** choose **Offline demo**, **Anti-Mage**, position **1**, then **Find builds**. Demo builds are synthetic test data.
 

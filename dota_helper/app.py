@@ -180,6 +180,16 @@ class MainWindow(QMainWindow):
         self.capture_busy = False
         self.role_busy=False
         self.role_manual=False
+        self.hero_manual=False
+        self.observed_match_id=''
+        self.observed_game_state=None
+        self.observed_clock=None
+        self.draft_candidate=None
+        self.draft_candidate_at=0
+        self.draft_candidate_seen=0
+        self.draft_candidate_reads=0
+        self.draft_preview_hero=None
+        self.last_draft_lookup=None
         self.role_applied=False
         self.role_candidate=None
         self.role_streak=0
@@ -225,6 +235,7 @@ class MainWindow(QMainWindow):
         self.draft.meta_role=self.role.currentData()
         self.role.currentIndexChanged.connect(lambda _:self.draft.set_role(self.role.currentData()))
         self.role.activated.connect(self.override_role)
+        self.hero.activated.connect(self.override_hero)
         self.draft.use_hero.connect(self.use_draft_hero)
         self.draft_scroll = QScrollArea()
         self.draft_scroll.setWidgetResizable(True)
@@ -310,6 +321,13 @@ class MainWindow(QMainWindow):
         self.find_button = button("Find builds", self.find_or_cancel, True)
         selectors.addWidget(self.find_button)
         layout.addLayout(selectors)
+        detection_bar = QHBoxLayout()
+        self.selection_status = label('Hero: waiting for game · Position: saved selection', 'muted')
+        detection_bar.addWidget(self.selection_status, 1)
+        self.resume_detection_button = button('Resume detection', self.resume_detection)
+        self.resume_detection_button.setToolTip('Release manual hero and position overrides for this match')
+        detection_bar.addWidget(self.resume_detection_button)
+        layout.addLayout(detection_bar)
         history_bar = QHBoxLayout()
         self.history_choice = QComboBox()
         self.history_choice.setMinimumWidth(240)
@@ -327,6 +345,10 @@ class MainWindow(QMainWindow):
         options_layout = QVBoxLayout(self.more_options)
         options_layout.setContentsMargins(0, 0, 0, 0)
         options_layout.addWidget(self.auto_hero)
+        self.preview_draft_hero = QCheckBox('Preview stable draft hero before lock-in is confirmed')
+        self.preview_draft_hero.setChecked(self.settings.get('preview_draft_hero', True))
+        self.preview_draft_hero.toggled.connect(lambda value: self.settings.update(preview_draft_hero=value))
+        options_layout.addWidget(self.preview_draft_hero)
         imports = QHBoxLayout()
         options_layout.addLayout(imports)
         self.match_input = QLineEdit()
@@ -572,6 +594,7 @@ class MainWindow(QMainWindow):
         self.status.setText(message)
 
     def context_changed(self):
+        self.auto_fetch_attempted = False
         self.quantity_cancel.set()
         self.quantity_attempted.clear()
         if not hasattr(self, "route_choice"):
@@ -629,6 +652,10 @@ class MainWindow(QMainWindow):
         entry=next((e for e in self.history.entries if e['key']==self.history_choice.currentData()),None)
         if not entry:
             return
+        self.hero_manual=True
+        self.role_manual=True
+        self.role_epoch+=1
+        self.draft_preview_hero=None
         self.hero.setCurrentIndex(self.hero.findData(entry['hero']))
         self.role.setCurrentIndex(self.role.findData(entry['role']))
         self.source.setCurrentIndex(entry['source'])
@@ -794,6 +821,8 @@ class MainWindow(QMainWindow):
         self.source.setCurrentIndex(0)
         self.hero.setCurrentIndex(self.hero.findData(hero_id))
         self.tabs.setCurrentIndex(0)
+        self.hero_manual = True
+        self.draft_preview_hero = None
         # Select in the assistant only; never issue a pick to the game.
         if self.fetching:
             self.cancel.set()
@@ -1060,10 +1089,32 @@ class MainWindow(QMainWindow):
             self.session.learned[skill] = max(0, self.session.learned[skill] - 1)
 
     def on_gsi(self, payload):
-        drafting=payload.get('map',{}).get('game_state')=='DOTA_GAMERULES_STATE_HERO_SELECTION'
+        game_map=payload.get('map',{})
+        state=game_map.get('game_state', self.observed_game_state)
+        match_id=str(game_map.get('matchid') or '')
+        if match_id=='0':match_id=''
+        drafting=state=='DOTA_GAMERULES_STATE_HERO_SELECTION'
+        new_match=(match_id and self.observed_match_id and match_id!=self.observed_match_id)
+        new_draft=drafting and self.observed_game_state is not None and not self.draft_phase
+        clock=game_map.get('clock_time')
+        new_bot_game=(type(clock) is int and clock<0 and self.observed_clock is not None
+                      and self.observed_clock>0)
+        if new_match or new_draft or new_bot_game:
+            self.reset_detection_overrides()
+            self.session.reset(self.hero.currentData())
+            self.manual_second=0
+            self.manual_running=False
+            self.manual_skill_history=[]
+            self.generation+=1
+            self.cancel.set()
+            self.pending_auto_fetch=False
+            self.routes=[]
+            self.render_routes()
+        if type(clock) is int:self.observed_clock=clock
+        if match_id:self.observed_match_id=match_id
+        self.observed_game_state=state
         if drafting and not self.draft_phase:
             self.role_epoch+=1
-            self.role_manual=False
             self.role_applied=False
             self.role_candidate=None
             self.role_streak=0
@@ -1071,7 +1122,7 @@ class MainWindow(QMainWindow):
         self.role_state_at=time.monotonic()
         self.lane_timers.ingest(payload)
         self.draft.ingest_draft(payload)
-        if payload.get('map',{}).get('game_state')=='DOTA_GAMERULES_STATE_HERO_SELECTION':
+        if drafting and not self.draft_preview_hero and not self.hero_manual:
             new_draft=not self.draft.meta_active
             self.draft.meta_active=True
             if new_draft or self.draft.meta_requested_role is None:
@@ -1079,19 +1130,25 @@ class MainWindow(QMainWindow):
         if self.source.currentIndex() == 1:
             return
         hero_id = payload.get("hero", {}).get("id")
-        if str(hero_id) not in HEROES:
+        if type(hero_id) is not int or str(hero_id) not in HEROES or not payload.get('player',{}).get('steamid'):
+            self.draft_candidate=None
+            self.draft_candidate_reads=0
             self.gsi_status = "Dota data received · waiting for a local hero (draft/menu or spectator data)"
             return
-        if not self.auto_hero.isChecked() and hero_id != self.session.hero_id:
-            self.gsi_status = "Game hero differs from manual selection. Enable automatic hero selection to sync."
+        if (self.hero_manual or not self.auto_hero.isChecked()) and hero_id != self.session.hero_id:
+            self.gsi_status = "Game hero differs · keeping manual hero. Resume detection to follow Dota."
             return
         previous_match, previous_hero = self.session.match_id, self.session.hero_id
         previous_clock = self.session.clock
         previous_skills_at = self.session.skills_at
         if payload.get("map", {}).get("game_state") == "DOTA_GAMERULES_STATE_HERO_SELECTION":
             self.gsi_status = f"Draft data received · {HEROES[str(hero_id)]['localized_name']} · waiting for confirmed pick / strategy phase"
+            self.preview_game_hero(hero_id)
             return
         if self.session.ingest(payload):
+            self.draft_preview_hero=None
+            self.draft_candidate=None
+            self.draft_candidate_reads=0
             self.draft.meta_active=False
             self.draft.overlay_enabled.setChecked(False)
             if self.session.skills_at != previous_skills_at:
@@ -1132,6 +1189,7 @@ class MainWindow(QMainWindow):
                 self.purchases.blockSignals(False)
 
     def new_match(self):
+        self.reset_detection_overrides()
         self.draft.meta_active=True
         self.draft.clear()
         self.draft.overlay_enabled.setChecked(False)
@@ -1163,6 +1221,12 @@ class MainWindow(QMainWindow):
         return second, "Manual estimate" + (" · paused" if not self.manual_running else "")
 
     def tick(self):
+        hero_mode=('manual' if self.hero_manual or not self.auto_hero.isChecked() else
+                   'draft preview · unconfirmed' if self.draft_preview_hero else
+                   'game confirmed' if self.session.field_status('hero')=='fresh' else 'waiting for game')
+        role_mode='manual' if self.role_manual else 'screen detected' if self.role_applied else 'saved selection'
+        self.selection_status.setText(f'Hero: {hero_mode} · Position: {role_mode}')
+        self.resume_detection_button.setEnabled(self.hero_manual or self.role_manual or not self.auto_hero.isChecked())
         active = dota_active()
         visible = self.overlay_enabled.isChecked() and (active or self.preview.isChecked())
         self.overlay.set_locked(active or not self.preview.isChecked())
@@ -1173,6 +1237,8 @@ class MainWindow(QMainWindow):
         self.overlay.title.hide()
         self.overlay.hero.setText(f"{self.hero.currentText()} · {ROLES[self.role.currentData()]}")
         self.overlay.clock.setText(f"{clock_text(second)} · {clock_status}")
+        if self.draft_preview_hero:
+            self.overlay.clock.setText('Draft preview · lock-in unconfirmed')
         if route:
             self.overlay.title.setText("OFFLINE DEMO" if route.demo else "TOURNAMENT BUILD" if route.tournament else "RANKED PUB BUILD")
             self.overlay.route_label.setText(route_identity(route))
@@ -1407,7 +1473,66 @@ class MainWindow(QMainWindow):
 
     def override_role(self, *_):
         self.role_manual=True
+        self.role_epoch+=1
         self.role_status.setText('Manual position override for this match')
+        self.request_selection_builds()
+
+    def override_hero(self, *_):
+        self.hero_manual=True
+        self.draft_preview_hero=None
+        self.request_selection_builds()
+
+    def request_selection_builds(self):
+        """Only the latest selection may publish; an old request must finish first."""
+        self.auto_fetch_attempted=True
+        if self.fetching:
+            self.cancel.set()
+            self.pending_auto_fetch=True
+        else:
+            self.fetch()
+
+    def reset_detection_overrides(self):
+        self.hero_manual=False
+        self.role_manual=False
+        self.role_applied=False
+        self.role_candidate=None
+        self.role_streak=0
+        self.role_epoch+=1
+        self.draft_candidate=None
+        self.draft_candidate_reads=0
+        self.draft_preview_hero=None
+        self.last_draft_lookup=None
+        self.auto_fetch_attempted=False
+
+    def resume_detection(self):
+        self.reset_detection_overrides()
+        self.auto_hero.setChecked(True)
+        self.role_status.setText('Waiting for assigned-role text during draft; OCR must be enabled and calibrated.')
+        self.gsi_status='Automatic selection resumed · waiting for fresh game data'
+
+    def preview_game_hero(self, hero_id):
+        """A stable local GSI hero can warm builds, but does not prove lock-in."""
+        if self.hero_manual or not self.auto_hero.isChecked() or not self.preview_draft_hero.isChecked():
+            return
+        now=time.monotonic()
+        if hero_id!=self.draft_candidate or now-self.draft_candidate_seen>5:
+            self.draft_candidate=hero_id
+            self.draft_candidate_at=now
+            self.draft_candidate_reads=0
+        self.draft_candidate_seen=now
+        self.draft_candidate_reads+=1
+        if self.draft_candidate_reads<3 or now-self.draft_candidate_at<2:
+            return
+        if self.draft_preview_hero==hero_id:
+            return
+        if self.last_draft_lookup is not None and now-self.last_draft_lookup<10:
+            return
+        self.last_draft_lookup=now
+        self.hero.setCurrentIndex(self.hero.findData(hero_id))
+        self.draft_preview_hero=hero_id
+        self.draft.meta_active=False
+        self.draft.overlay_enabled.setChecked(False)
+        self.request_selection_builds()
 
     def calibrate_role(self):
         self.status.setText('Capture in 5 seconds. Focus Dota with your assigned role visible.')
@@ -1428,16 +1553,21 @@ class MainWindow(QMainWindow):
         def done(role):
             self.role_busy=False
             if (epoch!=self.role_epoch or self.role_manual or not self.draft_phase
-                    or not self.role_ocr.isChecked() or time.monotonic()-self.role_state_at>5):return
+                    or not self.role_ocr.isChecked() or time.monotonic()-self.role_state_at>5
+                    or not dota_active()):return
             self.role_streak=self.role_streak+1 if role and role==self.role_candidate else 1 if role else 0
             self.role_candidate=role
             self.role_status.setText('Role unclear; manual selection remains available.' if not role else f'Checking position {role}: {self.role_streak}/3 reads')
             if role and self.role_streak>=3:
                 self.role_applied=True
+                changed=self.role.currentData()!=role
                 self.role.setCurrentIndex(self.role.findData(role))
                 self.role_status.setText(f'Detected position {role}. Change position in Builds to override.')
+                if changed and (self.draft_preview_hero or self.hero_manual or self.session.field_status('hero')=='fresh'):
+                    self.request_selection_builds()
         def failed(message):
             self.role_busy=False
+            if epoch!=self.role_epoch:return
             self.role_streak=0
             self.role_status.setText(message)
             self.role_ocr.setChecked(False)
@@ -1446,8 +1576,10 @@ class MainWindow(QMainWindow):
     def use_candidate(self):
         if self.detected:
             self.hero.setCurrentIndex(self.hero.findData(self.detected))
+            self.hero_manual=True
+            self.draft_preview_hero=None
             self.tabs.setCurrentIndex(0)
-            self.fetch()
+            self.request_selection_builds()
 
     def save_settings(self):
         if hasattr(self, "opacity"):

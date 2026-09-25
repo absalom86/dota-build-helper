@@ -28,6 +28,17 @@ select your hero; manual selection and Find builds also work. Click a match
 row to follow its build. Draft picks fill when Dota supplies them; otherwise
 enter them manually. Actual game-data delivery needs this check on your PC.
 
+EARLY BUILDS AND SWAPS
+If Dota supplies your local hero during draft, three stable updates preload
+a labelled draft preview. This does not confirm lock-in; strategy-time game
+data confirms the hero. Missing draft data still needs manual selection.
+Change hero or position in Builds to reload builds and keep that manual choice
+for this match. Resume detection releases both overrides. New matches reset
+the overrides. More options lets you disable draft previews or auto hero sync.
+Position OCR is optional: install Tesseract with English data, calibrate only
+YOUR assigned-role text under Draft role recognition, then enable it. Three
+confident reads select the role. Otherwise the saved position stays selected.
+
 BUILDS AND QUANTITIES
 Patch confidence comes first, then premier events, other tournaments, pro
 players and pubs, newest first within each group. This does not rank actual
