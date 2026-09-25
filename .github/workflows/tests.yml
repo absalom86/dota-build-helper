@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 15
     env:
       QT_QPA_PLATFORM: offscreen
-      DOTA_HELPER_HOME: ${{ runner.temp }}/dota-helper-tests
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,6 +22,7 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: |
+          "DOTA_HELPER_HOME=$env:RUNNER_TEMP/dota-helper-tests" >> $env:GITHUB_ENV
           python -m pip install -r requirements.lock.txt
           python -m pip install --no-deps -e .
       - name: Unit and UI tests
