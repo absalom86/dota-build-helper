@@ -92,5 +92,14 @@ limit to reset; saved builds remain usable. Offline demo needs no key or game.
 Optional draft-role recognition requires separate Tesseract English OCR and
 calibration; manual position selection always works.
 
+UPDATES
+The packaged app checks GitHub for updates at startup, at most once per day.
+Click Updates, then Download. After your match, click Install and restart.
+The installer preserves your STRATZ key, settings and saved searches. Do not
+uninstall first or delete the DotaBuildHelper settings folder. Later postpones
+the reminder. Older versions need one manual installer update to add this feature.
+Portable users: updates install the app; use the Start menu shortcut afterward.
+Manual download: https://github.com/absalom86/dota-build-helper/releases/latest
+
 Find this again in Start > Dota Build Helper > Quick setup. See the Testing guide
 for detailed checks. Setup is incomplete until the bot-game checks pass.

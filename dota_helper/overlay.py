@@ -1,32 +1,27 @@
-"""A content-sized, click-through overlay with no hidden scrollable sections."""
+"""A screen-bounded overlay with responsive columns and a readable overflow fallback."""
 from html import escape
 import time
 
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QSizeGrip, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QSizeGrip, QScrollBar, QWidget
 
 from . import invoker
-from .catalog import clock_text, item_name, patch_name
-from .ranking import patch_group
+from .catalog import clock_text, item_name
+from .recency import neutral_patch_label
+from .ratings import rating_text
 
 
 def route_identity(route, now=None):
     if route.demo:
         return 'OFFLINE DEMO · synthetic'
     source = (f'PRO · {route.player}' if route.tournament or route.pro_player else
-              f'{route.average_mmr:,} MMR' if route.average_mmr else 'Ranked pub · MMR unknown')
+              rating_text(route))
     source = ' '.join(source.split())
     if len(source) > 55:
         source = source[:52] + '…'
     age = max(0, int(((time.time() if now is None else now)-route.start_time)/86400))
     date = f' · {age}d ago' if route.start_time and age else ' · today' if route.start_time else ''
-    patch = route.patch_label or (patch_name(route.patch) if route.patch else '')
-    if not patch or patch_group(route) == 1:
-        patch = 'Patch unverified'
-    else:
-        patch = 'Patch ' + patch
-        if patch_group(route) == 0:
-            patch += ' · older'
+    patch = 'Patch ' + neutral_patch_label(route)
     return source + date + '\n' + patch
 
 
@@ -63,6 +58,8 @@ class Overlay(QWidget):
         self._fitting = True
         self.resize(self.preferred_width, settings.get('overlay_h', 600))
         self.move(settings['overlay_x'], settings['overlay_y'])
+        self.preferred_y = self.y()
+        self._fitted_y = None
         self.origin = None
         self.locked = False
         self.invoker_active = False
@@ -70,9 +67,18 @@ class Overlay(QWidget):
         self.fit_message = ''
         self.item_lines = None
         self._fit_key = None
+        self.effective_font_size = self.font_size
+        self.viewport = QWidget(self)
+        self.content = QWidget(self.viewport)
+        self.overflow_bar = QScrollBar(Qt.Orientation.Vertical, self)
+        self.overflow_bar.valueChanged.connect(lambda value: self.content.move(0, -value))
+        self.overflow_bar.hide()
+        self.overflow_hint = QLabel('More below · scroll in Preview', self)
+        self.overflow_hint.setStyleSheet('font-size:11px; color:#ffe0a3; background:#263239; padding:3px;')
+        self.overflow_hint.hide()
 
         def label(text='', muted=False):
-            result = QLabel(text, self)
+            result = QLabel(text, self.content)
             result.setWordWrap(True)
             result.setTextFormat(Qt.TextFormat.PlainText)
             result.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -107,6 +113,8 @@ class Overlay(QWidget):
 
     def place_top_right(self):
         bounds = self.screen().availableGeometry()
+        self.preferred_y = bounds.top()+160
+        self._fitted_y = None
         self.move(bounds.right()-self.width()-11, bounds.top()+160)
         self.fit_content()
 
@@ -128,8 +136,9 @@ class Overlay(QWidget):
         self.items.setTextFormat(Qt.TextFormat.PlainText)
         self.items.setText(text)
 
-    def _style_labels(self):
-        size = self.font_size
+    def _style_labels(self, size=None):
+        size = self.font_size if size is None else size
+        self.effective_font_size = size
         for widget in self.labels:
             widget.setStyleSheet(f'font-size:{size}px;')
         self.hero.setStyleSheet(f'font-size:{size+2}px; font-weight:600; color:#f6f1e8;')
@@ -140,7 +149,8 @@ class Overlay(QWidget):
                                       'font-weight:600; padding:6px; border-left:3px solid #d4a15c;')
         for widget in (self.components, self.supplies):
             widget.setStyleSheet(f'font-size:{max(11,size-1)}px; color:#b6d8d2; background:#192932; padding:4px;')
-        self.skill.setStyleSheet(f'font-size:{size}px; font-weight:600; color:#d9c4ed;')
+        self.skill.setStyleSheet(f'font-size:{size+1}px; font-weight:600; color:#f0dcff; '
+                                'background:#2a2638; padding:5px; border-left:3px solid #bda0df;')
         self.invoker_spells.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
         for widget in self.labels:
             widget.ensurePolished()
@@ -172,9 +182,9 @@ class Overlay(QWidget):
         if split == 3:
             column = (inner-2*gap)//3
             right = inner-2*gap-2*column
-            y = max(stack([self.items], margin, y, column),
+            y = max(stack([self.skill, self.items], margin, y, column),
                     stack([self.initial_buy, self.components, self.supplies], margin+column+gap, y, column),
-                    stack([self.skill, self.talents, self.invoker_spells],
+                    stack([self.talents, self.invoker_spells],
                           margin+2*(column+gap), y, right))
         elif split:
             left = (inner-gap)//2
@@ -183,16 +193,24 @@ class Overlay(QWidget):
                     stack([self.initial_buy, self.skill, self.talents, self.invoker_spells],
                           margin+left+gap, y, right))
         else:
-            y = stack([self.components, self.supplies, self.items, self.skill, self.talents,
+            y = stack([self.skill, self.components, self.supplies, self.items, self.talents,
                        self.invoker_spells], margin, y, inner)
         y = stack([self.note, self.lane_timers], margin, y, inner)
         return placements, y + margin + (0 if self.locked else 12)
 
     def fit_content(self, bounds=None):
-        """Prefer narrow/tall; widen and place build beside skills only when needed."""
+        """Fit within logical screen bounds, including Windows display scaling.
+
+        Keep the preferred font when possible. Reclaim a low saved position,
+        then temporarily compact text before moving above the usual HUD margin.
+        Exceptionally large data uses an explicit Preview scrollbar, never a
+        window extending below the monitor.
+        """
         bounds = bounds or self.screen().availableGeometry()
-        y = max(bounds.top()+8, min(self.y(), bounds.bottom()-180))
-        max_height = bounds.bottom()-y-8
+        if self._fitted_y is None or self.y() != self._fitted_y:
+            self.preferred_y = self.y()
+        y = max(bounds.top()+8, min(self.preferred_y, bounds.bottom()-180))
+        anchor = min(y, bounds.top()+160)
         max_width = min(bounds.width()-16, 600)
         preferred = min(self.preferred_width, max_width)
         key = (preferred, self.font_size, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
@@ -200,43 +218,84 @@ class Overlay(QWidget):
                tuple((widget.text(), widget.isHidden()) for widget in self.labels if widget is not self.invoker_spells))
         if key == self._fit_key:
             return
-        self._style_labels()
-        # Normal windows stay narrow; short displays can use a two-column body.
-        candidates = [(preferred, False)]
-        candidates += [(w, False) for w in range(preferred+30, min(390, max_width)+1, 30)]
-        candidates += [(w, True) for w in range(max(420, preferred), max_width+1, 30)]
-        if candidates[-1][0] != max_width:
-            candidates.append((max_width, max_width >= 420))
-        if max_width >= 540:
-            # Exceptionally crowded pregame on a short display: keep every section
-            # visible by giving temporary purchases their own middle column.
-            candidates.append((max_width, 3))
+        # Draft suggestions live in one label. Narrowing that label into a build
+        # column merely adds wrapping while leaving the other columns empty.
+        auxiliary = any(not w.isHidden() and w.text() for w in
+                        (self.initial_buy, self.components, self.supplies, self.talents, self.invoker_spells))
+        widths = list(range(preferred, max_width+1, 30))
+        if max_width not in widths:
+            widths.append(max_width)
+        candidates = [(w, False) for w in widths if w <= 390]
+        if auxiliary:
+            candidates += [(w, True) for w in widths if w >= 420]
+            if max_width >= 540:
+                candidates.append((max_width, 3))
+        candidates += [(w, False) for w in widths if w > 390]
+        layouts = []
         selected = None
-        for width, split in candidates:
-            self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
-            placements, height = self._arrange(width, split)
-            selected = (width, height, placements, split)
-            if height <= max_height:
+        for size in range(self.font_size, 10, -1):
+            self._style_labels(size)
+            measured = []
+            for width, split in candidates:
+                self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
+                placements, height = self._arrange(width, split)
+                measured.append((width, height, placements, split, size))
+            layouts.extend(measured)
+            selected = next((layout for layout in measured if layout[1] <= bounds.bottom()-anchor-8), None)
+            if selected:
                 break
-        width, height, placements, split = selected
-        # A preview explicitly reports oversized content; never silently elide an item/talent.
-        self.fit_ok = height <= max_height
-        self.fit_message = (f'{width} × {height}px · all sections visible' if self.fit_ok else
-                            'More room needed: move overlay up or reduce text size in Preview.')
+        if selected is None:
+            # On very short logical displays use the rest of the screen. Prefer
+            # the user's font, then a smaller width, among layouts that fit.
+            fitting = [layout for layout in layouts if layout[1] <= bounds.height()-16]
+            selected = min(fitting, key=lambda v: (-v[4], v[0], v[1])) if fitting else min(layouts, key=lambda v: v[1])
+        width, content_height, placements, split, size = selected
+        self._style_labels(size)
+        self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
+        height = min(content_height, bounds.height()-16)
+        y = max(bounds.top()+8, min(y, bounds.bottom()-height-8))
+        self.fit_ok = content_height <= height
+        if not self.fit_ok:
+            # Reserve actual space for the scrollbar and notice, then remeasure
+            # the full content at its real viewport width rather than clipping it.
+            placements, content_height = self._arrange(width-18, split)
+        compact = f' · auto-fit {size}px (preferred {self.font_size}px)' if size != self.font_size else ''
+        self.fit_message = (f'{width} × {height}px · all sections visible{compact}' if self.fit_ok else
+                            f'{width} × {height}px · scroll in Preview for remaining content{compact}')
         right = min(bounds.right()-8, max(bounds.left()+width+8, self.x()+self.width()))
         self._fitting = True
         self.resize(width, height)
         self.move(right-width, y)
+        self._fitted_y = y
+        viewport_height = height if self.fit_ok else height-28
+        self.viewport.setGeometry(0, 0, width if self.fit_ok else width-18, viewport_height)
+        self.content.resize(self.viewport.width(), content_height)
+        self.overflow_bar.setVisible(not self.fit_ok)
+        self.overflow_hint.setVisible(not self.fit_ok)
+        self.overflow_bar.setGeometry(width-18, 0, 18, viewport_height)
+        self.overflow_hint.setGeometry(0, height-28, width, 28)
+        self.overflow_bar.setRange(0, max(0, content_height-viewport_height) if not self.fit_ok else 0)
+        self.overflow_bar.setPageStep(viewport_height)
+        self.content.move(0, -self.overflow_bar.value())
         for widget, rect in placements:
             widget.setGeometry(rect)
         self.grip.setGeometry(width-20, height-16, 12, 12)
         self._fitting = False
         self._fit_key = key
 
+    def wheelEvent(self, event):
+        if not self.locked and self.overflow_bar.maximum():
+            self.overflow_bar.setValue(self.overflow_bar.value()-event.angleDelta().y()//3)
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
     def set_locked(self, locked):
         if self.locked == locked:
             return
         self.locked = locked
+        if locked:
+            self.overflow_bar.setValue(0)
         self.grip.setVisible(not locked)
         self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, locked)
 

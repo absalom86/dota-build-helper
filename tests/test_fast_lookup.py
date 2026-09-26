@@ -106,17 +106,62 @@ def test_failure_distinguished_from_filter_rejection(tmp_path, monkeypatch):
     assert "1 different/unknown position" in status
 
 
-def test_previous_patch_never_substituted(tmp_path, monkeypatch):
-    client = setup_client(tmp_path, monkeypatch, lambda mid: match(mid, PATCHES[-1]["id"] - 1))
-    assert not fast_routes(client, 1, 1, 0, lambda _: None, threading.Event())[0]
+@pytest.mark.parametrize('days,expected', [(60, 2), (91, 0)])
+def test_build_window_uses_match_age_instead_of_patch(tmp_path, monkeypatch, days, expected):
+    def detail(mid):
+        game = match(mid, PATCHES[-1]['id'] - 1)
+        game['start_time'] = int(time.time()) - days * 86400
+        return game
+    client = setup_client(tmp_path, monkeypatch, detail)
+    routes, _ = fast_routes(client, 1, 1, 0, lambda _: None, threading.Event())
+    assert len(routes) == expected
+    assert all(route.patch == PATCHES[-1]['id'] - 1 for route in routes)
+    assert not any('older patch' in warning.lower() or 'fallback' in warning.lower()
+                   for route in routes for warning in route.warnings)
 
 
-def test_candidates_capped_ten_and_pro_priority():
+def test_candidate_window_includes_prior_patch_and_rejects_expired_or_future_games():
+    now = time.time()
+    rows = [{'match_id': 1, 'start_time': now - 60 * 86400, 'patch': PATCHES[-1]['id'] - 1},
+            {'match_id': 2, 'start_time': now - 91 * 86400, 'patch': PATCHES[-1]['id']},
+            {'match_id': 3, 'start_time': now + 86400, 'patch': PATCHES[-1]['id']}]
+    assert [row['match_id'] for row in current_candidates(rows, set())] == [1]
+
+
+def test_all_current_candidates_retained_with_pro_priority():
     rows = [{"match_id": i, "account_id": i, "start_time": int(time.time()) - i} for i in range(1, 30)]
     rows.append({"match_id": 100, "start_time": 0})
     result = current_candidates(rows, {25})
-    assert len(result) == 10 and result[0]["match_id"] == 25
+    assert len(result) == 29 and result[0]["match_id"] == 25
+    assert {r['match_id'] for r in result} == set(range(1, 30))
     assert all(r["match_id"] != 100 for r in result)
+
+
+def test_new_discovery_checks_and_retains_more_than_ten_eligible_games(tmp_path, monkeypatch):
+    import json
+    client = OpenDota(tmp_path)
+    calls, updates = [], []
+    monkeypatch.setattr(client, 'cached', lambda path, **kwargs: [] if path == 'proPlayers' else None)
+    def get(path, **kwargs):
+        calls.append(path)
+        if path == 'heroes/1/matches':
+            return [{'match_id': mid, 'start_time': int(time.time()) - mid}
+                    for mid in range(1, 21)]
+        game = match(int(path.split('/')[-1]))
+        if game['match_id'] == 19:
+            game['players'][0]['rank_tier'] = 75
+        elif game['match_id'] == 20:
+            game['players'][0]['position_est'] = 2
+        return game
+    monkeypatch.setattr(client, 'get', get)
+    routes, _ = fast_routes(client, 1, 1, 0, lambda _: None, threading.Event(),
+                            on_update=updates.append, seconds=2)
+    assert {route.match_ids[0] for route in routes} == set(range(1, 19))
+    assert set(calls) == {'heroes/1/matches'} | {f'matches/{mid}' for mid in range(1, 21)}
+    assert any(len(ready) > 10 for ready, _ in updates)
+    assert {route.id for route in updates[-1][0]} == {route.id for route in routes}
+    snapshot = json.loads((tmp_path / f"matches-v3-{PATCHES[-1]['id']}-1-1-0.json").read_text())
+    assert snapshot['complete'] is True and len(snapshot['routes']) == 18
 
 
 def test_stale_discovery_is_refreshed_without_hiding_cached_build(tmp_path, monkeypatch):
@@ -136,3 +181,31 @@ def test_stale_discovery_is_refreshed_without_hiding_cached_build(tmp_path, monk
     monkeypatch.setattr(client, "get", get)
     ready, _ = fast_routes(client, 1, 1, 0, lambda _: None, threading.Event(), on_update=updates.append)
     assert ready and updates and "heroes/1/matches" in calls
+
+
+def test_refresh_retains_all_eligible_cached_games_without_expanding_candidate_budget(tmp_path, monkeypatch):
+    import json
+    from dataclasses import asdict
+    from dota_helper.builds import normalize
+    client = setup_client(tmp_path, monkeypatch, match)
+    saved = []
+    for mid in range(20, 32):
+        game = match(mid, PATCHES[-1]['id'] - 1)
+        game['start_time'] = int(time.time()) - 60 * 86400
+        saved.append(asdict(normalize(game, game['players'][0], 'MMR unverified')))
+    wrong_role = dict(saved[0], id='wrong-role', role=4)
+    expired = dict(saved[0], id='expired', start_time=int(time.time()) - 91 * 86400)
+    snapshot = tmp_path / f"matches-v3-{PATCHES[-1]['id']}-1-1-0.json"
+    snapshot.write_text(json.dumps({'at':time.time(), 'complete':True, 'routes':saved+[wrong_role,expired]}))
+    calls = []
+    def detail(path, **kwargs):
+        calls.append(path)
+        return match(int(path.split('/')[-1]))
+    monkeypatch.setattr(client, 'get', detail)
+    updates = []
+    routes, _ = fast_routes(client, 1, 1, 0, lambda _:None, threading.Event(), on_update=updates.append)
+    assert len(updates[0][0]) == 12
+    assert len(routes) == 14
+    assert all(len(rows) >= 12 for rows, _ in updates)
+    assert set(calls) == {'matches/1', 'matches/2'}
+    assert len(json.loads(snapshot.read_text())['routes']) == 14

@@ -69,10 +69,27 @@ def test_benchmark_only_when_enough_samples():
     assert len(result[0].match_ids) == 3
 
 
-def test_single_sample_has_no_range_and_old_patch_is_labeled():
+def test_single_sample_has_no_range_and_prior_patch_is_not_a_fallback():
     result = rank_routes([route_fixture()], 1, 0, 61, time.time())[0]
     assert result.purchases[-1].low is None
-    assert any("OLDER PATCH" in w for w in result.warnings)
+    assert not any('older patch' in w.lower() or 'fallback' in w.lower() for w in result.warnings)
+
+
+def test_legacy_ranking_uses_ninety_days_without_patch_preference():
+    now = time.time()
+    prior, current, expired, future = [route_fixture() for _ in range(4)]
+    for index, route in enumerate((prior, current, expired, future)):
+        route.id = f'window:{index}'
+        route.match_ids = [index + 1]
+    prior.patch, prior.start_time = 60, now - 60 * 86400
+    prior.warnings += ['OLDER PATCH fallback: current-patch samples unavailable.']
+    current.patch, current.start_time = 61, now - 70 * 86400
+    expired.start_time = now - 91 * 86400
+    future.start_time = now + 86400
+    result = rank_routes([current, prior, expired, future], 1, 0, 61, now)
+    assert [route.id for route in result] == [prior.id, current.id]
+    assert not any('older patch' in warning.lower() or '60-day' in warning.lower()
+                   for route in result for warning in route.warnings)
 
 
 def test_route_switch_keeps_completion_and_skill_progress():

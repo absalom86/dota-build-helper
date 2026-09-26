@@ -6,9 +6,11 @@ import uuid
 from .catalog import PATCHES
 from .models import Route, Purchase
 from .ranking import ranked
+from .endgame import endgame_examples
+from .recency import neutral_patch_label, presentation_warnings
 
 SEARCH_TTL = 1800
-DISCOVERY_VERSION = 5
+DISCOVERY_VERSION = 11
 
 
 def patch_key():
@@ -16,18 +18,33 @@ def patch_key():
     return f"{p['id']}:{p['name']}:{p['date']}"
 
 
-def decode(entry):
+def _decode_records(entry, records):
     result=[]
-    for data in entry.get('routes',[]):
+    if not isinstance(records, list):
+        return result
+    for data in records:
         try:
             record=dict(data)
             record['purchases']=[Purchase(**p) for p in record['purchases']]
             route=Route(**record)
             if route.hero_id==entry['hero'] and route.role==entry['role'] and not route.demo:
+                route.warnings = presentation_warnings(route)
+                route.patch_label = neutral_patch_label(route)
                 result.append(route)
         except (KeyError,TypeError,ValueError):
             continue
-    return ranked(result)
+    return result
+
+
+def decode(entry):
+    preferred = entry.get('selected') if entry.get('selected_explicit', True) else None
+    return ranked(_decode_records(entry, entry.get('routes', [])), preferred_id=preferred)
+
+
+def decode_examples(entry):
+    # Old saved searches can supply examples without a network migration.
+    routes = _decode_records(entry, entry.get('endgame_routes', [])) + _decode_records(entry, entry.get('routes', []))
+    return endgame_examples(routes, entry['hero'], entry['role'])
 
 
 class SearchHistory:
@@ -64,24 +81,30 @@ class SearchHistory:
 
     def find(self, hero, role, source):
         matches=[e for e in self.entries if (e['hero'],e['role'],e['source'])==(hero,role,source)]
-        return max(matches,key=lambda e:(e['patch']==patch_key(),e['updated']),default=None)
+        return max(matches,key=lambda e:e['updated'],default=None)
 
-    def save(self, hero, role, source, routes, selected, status):
+    def save(self, hero, role, source, routes, selected, status, *, selected_explicit=True):
+        routes=[r for r in routes if r.hero_id==hero and r.role==role and not r.demo]
         if source==1 or not routes:
             return
         key=f'{hero}:{role}:{source}:{patch_key()}'
-        old=next((e for e in self.entries if e['key']==key),None)
+        old=next((e for e in self.entries if e['key']==key),None) or self.find(hero, role, source)
         cached='cached' in status.lower()
         now=time.time()
+        examples=endgame_examples((decode_examples(old) if old else []) + list(routes), hero, role)
+        preferred = selected if selected_explicit else None
+        routes=ranked((decode(old) if old else []) + routes, preferred_id=preferred)
         entry=dict(key=key,hero=hero,role=role,source=source,patch=patch_key(),patch_name=PATCHES[-1]['name'],
                    updated=old['updated'] if old and cached else now,used=now,
-                   cached_origin=cached,discovery_version=DISCOVERY_VERSION,selected=selected,status=status,routes=[asdict(r) for r in ranked(routes)])
+                   cached_origin=cached,discovery_version=DISCOVERY_VERSION,selected=selected,status=status,
+                   selected_explicit=bool(selected_explicit),
+                   routes=[asdict(r) for r in ranked(routes, preferred_id=preferred)],endgame_routes=[asdict(r) for r in examples])
         self.entries=[e for e in self.entries if e['key']!=key]+[entry]
         self.write()
 
     def choose(self, key, selected):
         for entry in self.entries:
             if entry['key']==key:
-                entry.update(selected=selected,used=time.time())
+                entry.update(selected=selected,selected_explicit=True,used=time.time())
                 self.write()
                 return

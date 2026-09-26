@@ -2,20 +2,19 @@
 from copy import deepcopy
 from collections import Counter
 from dataclasses import asdict
-from datetime import datetime
 import json
 from queue import Queue, Empty
 import threading
 import time
 import uuid
 
-from .builds import normalize, rank_routes
+from .builds import normalize
 from .catalog import PATCHES
 from .models import Route, Purchase
 from .ranking import ranked
+from .recency import RECENT_DAYS, in_recent_window
 
 LOOKUP_SECONDS = 8.0
-MAX_MATCHES = 10
 NETWORK_SLOTS = threading.BoundedSemaphore(3)
 
 
@@ -54,13 +53,11 @@ class DeadlineJobs:
 
 
 def current_candidates(rows, pros, cached_ranks=None):
-    patch_start = datetime.fromisoformat(PATCHES[-1]["date"].replace("Z", "+00:00")).timestamp()
     cached_ranks = cached_ranks or {}
     unique = {r["match_id"]: r for r in rows if isinstance(r, dict) and r.get("match_id")
-              and r.get("start_time", 0) >= patch_start
-              and (r.get("patch") is None or r["patch"] == PATCHES[-1]["id"])}
+              and in_recent_window(r.get("start_time"))}
     return sorted(unique.values(), key=lambda r: (r.get("account_id") in pros,
-                  cached_ranks.get(r["match_id"], 0), r.get("start_time", 0)), reverse=True)[:MAX_MATCHES]
+                  cached_ranks.get(r["match_id"], 0), r.get("start_time", 0)), reverse=True)
 
 
 def fast_routes(client, hero_id, role, lane, progress, cancel, on_update=None, seconds=LOOKUP_SECONDS):
@@ -75,13 +72,15 @@ def fast_routes(client, hero_id, role, lane, progress, cancel, on_update=None, s
             row = dict(row)
             row["purchases"] = [Purchase(**p) for p in row["purchases"]]
             route = Route(**row)
-            if route.patch == PATCHES[-1]["id"] and route.hero_id == hero_id and route.role == role and (not lane or route.lane == lane):
+            if (in_recent_window(route.start_time) and route.hero_id == hero_id
+                    and route.role == role and (not lane or route.lane == lane)):
                 fallback.append(route)
         fallback = ranked(fallback)
         age = max(0, int(time.time() - snapshot["at"]))
         if fallback:
             status = f"Cached individual games · Match MMR unverified · {age // 60} minutes old · ready immediately."
-            if age < 1800 and snapshot.get("complete") is True and not getattr(client,'force_refresh',False):
+            if (age < 1800 and snapshot.get("complete") is True
+                    and snapshot.get('window_days') == RECENT_DAYS and not getattr(client,'force_refresh',False)):
                 return fallback, status + " " + snapshot.get("diagnostic", "")
             for route in fallback:
                 route.warnings.append(f"Cached build snapshot: {age // 60} minutes old; refresh pending.")
@@ -110,8 +109,8 @@ def fast_routes(client, hero_id, role, lane, progress, cancel, on_update=None, s
 
     def collect(match):
         mid = match.get("match_id") if isinstance(match, dict) else None
-        if not isinstance(match, dict) or match.get("patch") != PATCHES[-1]["id"]:
-            outcomes[mid] = "wrong/unknown patch"
+        if not isinstance(match, dict) or not in_recent_window(match.get('start_time')):
+            outcomes[mid] = f"outside {RECENT_DAYS}-day window or date unavailable"
             return
         # Registry membership never overrides rank. Reject known below-Immortal
         # profiles anywhere in the lobby; absent ranks are explicitly unverified.
@@ -137,8 +136,7 @@ def fast_routes(client, hero_id, role, lane, progress, cancel, on_update=None, s
                 outcomes[mid] = "different/unknown position"
 
     def results():
-        unique = {r.id: r for r in eligible}
-        return deepcopy(ranked(unique.values(), MAX_MATCHES))
+        return deepcopy(ranked(fallback + eligible))
 
     def enqueue_candidates():
         ranks = {}
@@ -148,11 +146,11 @@ def fast_routes(client, hero_id, role, lane, progress, cancel, on_update=None, s
                 ranks[row["match_id"]] = max((p.get("rank_tier") or 0 for p in cached.get("players", []) if p.get("hero_id") == hero_id), default=0)
         for row in current_candidates(rows, pros, ranks):
             mid = row["match_id"]
-            if mid not in attempted and mid not in pending and len(attempted) + len(pending) < MAX_MATCHES:
+            if mid not in attempted and mid not in pending:
                 pending.append(mid)
 
     enqueue_candidates()
-    progress("Quick lookup · current patch only · up to 10 candidates · 8-second budget")
+    progress(f"Quick lookup · last {RECENT_DAYS} days · checking available candidates within 8 seconds")
     last_signature = None
     while not cancel.is_set() and time.monotonic() < jobs.deadline:
         while discovery:
@@ -216,11 +214,12 @@ def fast_routes(client, hero_id, role, lane, progress, cancel, on_update=None, s
     if ready:
         for route in ready:
             route.warnings.extend(client.stale)
-            route.warnings.append("Up to 10 discovered candidates, prioritizing registered pros and known profile ranks; not a global top-10 MMR ranking.")
+            route.warnings.append("Available candidates checked within the lookup time budget, prioritizing registered pros and known profile ranks; not a global MMR ranking.")
         temp = snapshot_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        temp.write_text(json.dumps({"at": time.time(), "complete": complete, "diagnostic": diagnostic, "routes": [asdict(r) for r in ready]}), encoding="utf-8")
+        temp.write_text(json.dumps({"at": time.time(), "complete": complete, "window_days": RECENT_DAYS,
+                                    "diagnostic": diagnostic, "routes": [asdict(r) for r in ready]}), encoding="utf-8")
         temp.replace(snapshot_path)
         return ready, f"{len(ready)} individual games · Match MMR unverified · {elapsed:.1f}s. {diagnostic}." + (" Partial search; retry to check for more games." if not complete else "")
     if fallback:
         return fallback, f"{len(fallback)} cached games retained after {elapsed:.1f}s. {diagnostic}. Match MMR unverified."
-    return [], f"No matching current-patch game available within {elapsed:.1f}s. {diagnostic}. OpenDota does not verify match MMR. Paste a chosen match ID to load it directly."
+    return [], f"No matching game from the last {RECENT_DAYS} days available within {elapsed:.1f}s. {diagnostic}. OpenDota does not verify match MMR. Paste a chosen match ID to load it directly."

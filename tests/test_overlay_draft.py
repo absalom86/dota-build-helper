@@ -171,7 +171,7 @@ def test_stratz_starting_quantities_survive_same_second_and_display(tmp_path,mon
     window.session.accept_routes([route])
     window.render_routes()
     window.tick()
-    assert 'Iron Branch ×5' in window.match_table.item(0,3).text()
+    assert 'Iron Branch ×5' in window.match_table.item(0,4).text()
     assert 'Iron Branch ×5' in window.overlay.initial_buy.text()
     assert 'Tango ×1' in window.overlay.initial_buy.text()
     window.close()

@@ -32,6 +32,9 @@ def run(report_path):
         try:
             assert len(HEROES) > 100 and ITEMS and ABILITIES
             assert len(window.routes) == 3, "Demo routes did not load"
+            assert window.match_table.columnCount() == 6
+            assert window.match_table.horizontalHeaderItem(0).text() == 'Avg. MMR'
+            assert window.match_table.horizontalHeaderItem(1).text() == 'Avg. rank'
             window.purchases.item(6, 0).setCheckState(Qt.CheckState.Checked)
             window.route_choice.setCurrentIndex(1)
             assert ("bfury", 1) in window.session.completed
@@ -77,7 +80,7 @@ def run(report_path):
             result.update(ok=True, frozen=bool(getattr(sys, "frozen", False)), heroes=len(HEROES),
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
                           invoker_spells=len(invoker.SPELLS), shop_guide_export=True, overlay_fit=True,
-                          quantity_provenance=True, independent_telemetry=True, quick_setup=True,
+                          quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
                           credential_available=bool(load_token()),
                           data_directory=str(LOCAL), window_visible=window.isVisible())
         except Exception as exc:

@@ -3,9 +3,9 @@ import re
 from urllib.parse import urlparse
 
 from .builds import normalize
-from .catalog import PATCHES
 from .fast_lookup import DeadlineJobs
 from .providers import DataError
+from .recency import RECENT_DAYS, in_recent_window
 
 
 def match_id(text):
@@ -36,8 +36,8 @@ def load_match(client, mid, hero_id, role, lane, cancel):
         raise DataError("OpenDota could not load this game. Try again shortly.")
     if not isinstance(data, dict) or data.get("match_id") != mid:
         raise DataError("OpenDota returned an unexpected match.")
-    if data.get("patch") != PATCHES[-1]["id"]:
-        raise DataError("This game is not on the latest known patch; it was not loaded.")
+    if not in_recent_window(data.get('start_time')):
+        raise DataError(f"This game is outside the last {RECENT_DAYS} days or its date is unavailable; it was not loaded.")
     players = [p for p in data.get("players", []) if p.get("hero_id") == hero_id]
     if len(players) != 1:
         raise DataError("The selected hero is missing or ambiguous in this game.")

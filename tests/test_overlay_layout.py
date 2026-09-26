@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QAbstractScrollArea
 from dota_helper.app import MainWindow, STYLE
 from dota_helper import invoker, starting_items
 from dota_helper.models import Purchase
-from dota_helper.overlay import Overlay
+from dota_helper.overlay import Overlay, route_identity
 from dota_helper.providers import Demo
 from dota_helper.catalog import PATCHES
 
@@ -38,7 +38,7 @@ def crowded_overlay(milestones=15):
                        'overlay_h': 600, 'overlay_x': 1060, 'overlay_y': 160}, STYLE)
     overlay.set_locked(True)
     overlay.hero.setText('Invoker · Mid')
-    overlay.route_label.setText('PRO · Example player · 2d ago\nPatch unverified')
+    overlay.route_label.setText('PRO · Example player · 2d ago\nPatch unknown')
     overlay.clock.setText('00:00 · Game clock')
     overlay.initial_buy.setText(
         'STARTING BUY · counts unverified\nTango ×2, Iron Branch ×2 (estimated), '
@@ -59,7 +59,7 @@ def crowded_overlay(milestones=15):
              'Boots of Travel (Level 2)', 'Arcane Blink', 'Moon Shard']
     overlay.set_item_lines([(f'{3 + index * 3:02}:00  {name}', index < 2)
                             for index, name in enumerate(items[:milestones])])
-    overlay.skill.setText('Next upgrade: Quas')
+    overlay.skill.setText('NEXT SKILL\nQuas\nThen: Exort → Wex')
     overlay.talents.setText('Talent picks · recorded order\n+50 Ice Wall DPS\n'
                            '+50 Forged Spirit Attack Speed\n+2 Chaos Meteors\n'
                            '+2.5s Tornado Lift Duration')
@@ -153,7 +153,7 @@ def test_height_only_resize_is_repaired_without_waiting_for_clock_change(qt_appl
         overlay.close()
 
 
-def test_large_font_keeps_user_size_and_reports_any_screen_limit(qt_application):
+def test_large_font_preference_is_retained_while_content_fits_screen(qt_application):
     overlay = crowded_overlay(15)
     bounds = QRect(0, 0, 1280, 720)
     try:
@@ -162,18 +162,11 @@ def test_large_font_keeps_user_size_and_reports_any_screen_limit(qt_application)
         qt_application.processEvents()
         overlay.fit_content(bounds)
         assert overlay.font_size == 16
-        assert overlay.items.font().pixelSize() == 16
+        assert 11 <= overlay.items.font().pixelSize() <= 16
         assert len(overlay.item_lines) == 15
         assert all(name in overlay.invoker_spells.text() for name, _ in invoker.SPELLS)
-        if overlay.fit_ok:
-            assert_visible_geometry(overlay, bounds)
-        else:
-            # Oversized content must be disclosed, never silently hidden or shrunk.
-            assert not bounds.contains(overlay.geometry())
-            assert 'More room needed' in overlay.fit_message
-            for widget in overlay.labels:
-                if not widget.isHidden() and widget.text():
-                    assert overlay.rect().contains(widget.geometry())
+        assert_visible_geometry(overlay, bounds)
+        assert 'auto-fit' in overlay.fit_message
     finally:
         overlay.close()
 
@@ -234,10 +227,11 @@ def test_selected_route_identity_and_expiring_sections_reach_overlay(tmp_path, m
         window.tick()
         identity = window.overlay.route_label.text()
         assert '8,123 MMR' in identity and '2d ago' in identity
-        assert 'Patch unverified' in identity and route.player not in identity
+        assert 'Patch unknown' in identity and route.player not in identity
         assert not window.overlay.initial_buy.isHidden()
         assert not window.overlay.components.isHidden()
-        assert 'Healing Salve ×2' in window.overlay.supplies.text()
+        assert window.overlay.supplies.isHidden()
+        assert 'Healing Salve ×2' in window.overlay.supplies.toolTip()
         assert not window.overlay.invoker_spells.isHidden()
         route.pro_player = True
         route.player = 'Professional player'
@@ -251,9 +245,30 @@ def test_selected_route_identity_and_expiring_sections_reach_overlay(tmp_path, m
         assert f"Patch {PATCHES[-1]['name']}" in window.overlay.route_label.text()
         assert window.overlay.initial_buy.isHidden() and window.overlay.components.isHidden()
         assert not window.overlay.supplies.isHidden()
+        assert 'Healing Salve ×2' in window.overlay.supplies.text()
         window.manual_second = 600
         window.tick()
         assert window.overlay.supplies.isHidden()
         assert 'Manta Style' in window.overlay.items.text()
     finally:
         window.close()
+
+
+@pytest.mark.parametrize('patch_label,patch,expected', [
+    ('7.39', PATCHES[-2]['id'], '7.39'),
+    ('7.40b', PATCHES[-1]['id'], '7.40b'),
+    ('unverified (STRATZ 7.40b; bundled 7.39)', PATCHES[-1]['id'], '7.40b'),
+    ('unverified (source mismatch)', PATCHES[-1]['id'], 'unknown'),
+    ('', PATCHES[-2]['id'], PATCHES[-2]['name']),
+    ('', 0, 'unknown'),
+])
+def test_recent_prior_patch_identity_is_neutral(patch_label, patch, expected):
+    route = Demo().routes(1, 1, 0)[0][0]
+    route.demo = False
+    route.patch_label, route.patch = patch_label, patch
+    now = int(time.time())
+    route.start_time = now - 60 * 86400
+    identity = route_identity(route, now=now)
+    assert '60d ago' in identity
+    assert identity.splitlines()[-1] == 'Patch ' + expected
+    assert not any(word in identity.lower() for word in ('older', 'unverified', 'bundled'))

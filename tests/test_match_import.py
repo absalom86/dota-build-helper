@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 
@@ -64,5 +65,10 @@ def test_import_direct_without_discovery_and_checks_context(tmp_path, monkeypatc
         with pytest.raises(DataError):
             load_match(client, 123, hero, role, lane, threading.Event())
     data["patch"] -= 1
-    with pytest.raises(DataError, match="patch"):
+    data['start_time'] = int(time.time()) - 60 * 86400
+    prior_patch = load_match(client, 123, 1, 1, 0, threading.Event())
+    assert prior_patch.patch == data['patch']
+    assert not any('older patch' in warning.lower() for warning in prior_patch.warnings)
+    data['start_time'] = int(time.time()) - 91 * 86400
+    with pytest.raises(DataError, match='90 days'):
         load_match(client, 123, 1, 1, 0, threading.Event())

@@ -40,8 +40,14 @@ class Route:
     tournament: bool = False
     pro_player: bool = False
     average_mmr: int | None = None
+    match_rank: float | None = None
+    match_rank_source: str = ''
     account_id: int | None = None
     player_slot: int | None = None
+    final_items: list[str] = field(default_factory=list)
+    average_rank: float | None = None
+    average_rank_source: str = ''
+    average_mmr_source: str = ''
 
 
 @dataclass
@@ -167,17 +173,24 @@ class Session:
             self.learned = learned
             self.skills_at = now
 
+    def skill_progress(self, route):
+        remaining = self.learned.copy()
+        progress = []
+        for skill in route.skills:
+            done = remaining[skill] > 0
+            if done:
+                remaining[skill] -= 1
+            progress.append((skill, done))
+        return progress
+
     def next_skill(self, route):
         wanted = Counter(route.skills)
         # GSI also reports innates and granted skills, which are not route conflicts.
         extra = Counter({k: v for k, v in (self.learned - wanted).items() if k.startswith("special_bonus_")})
         if extra:
             return None, "Learned skills differ from this route; review the sequence."
-        remaining = self.learned.copy()
-        for skill in route.skills:
-            if remaining[skill]:
-                remaining[skill] -= 1
-            else:
+        for skill, done in self.skill_progress(route):
+            if not done:
                 return skill, "Upgrade sequence; exact hero levels unavailable"
         return None, "Recorded upgrade sequence complete"
 

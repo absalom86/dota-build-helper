@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import asdict
 import pytest
 from dota_helper.tournaments import tournament_routes, tournament_index as REAL_INDEX
@@ -74,6 +75,34 @@ def test_empty_tournaments_do_not_use_ranked_guide_fallback(tmp_path,monkeypatch
     assert routes==[] and 'No usable tournament' in status
 
 
+def test_tournament_discovery_continues_past_ten_in_bounded_batches(tmp_path, monkeypatch):
+    import re
+    from dota_helper.endgame import six_slot_items
+    from test_endgame import FINAL
+    client = Stratz(tmp_path, token='test')
+    games = {}
+    for mid in range(1, 31):
+        m = match(mid)
+        m.update(lobbyType='PRACTICE', leagueId=123)
+        m['players'][0]['stats']['itemPurchases'] += [
+            {'time':900+j, 'itemId':ITEMS['branches']['id']} for j in range(mid)]
+        games[mid] = m
+    games[15]['players'][0].update({f'item{i}Id':ITEMS[key]['id'] for i,key in enumerate(FINAL)})
+    monkeypatch.setattr('dota_helper.tournaments.tournament_index', lambda *a:[
+        dict(match_id=mid, leagueid=123, account_id=42, tier='premium', name='Recorded event') for mid in games])
+    calls = []
+    def query(q, variables=None):
+        if 'itemPurchases' not in q:
+            return {'constants':{'gameVersions':[{'id':182,'name':PATCHES[-1]['name']}]}}
+        ids = [int(n) for n in re.findall(r'match\(id:(\d+)\)', q)]
+        calls.append(ids)
+        return {f'm{i}':games[mid] for i,mid in enumerate(ids)}
+    monkeypatch.setattr(client, 'query', query)
+    routes, status = tournament_routes(client, 1, 1, reference_ids=[])
+    assert len(routes) == 30 and calls == [list(range(1, 11)), list(range(11, 21)), list(range(21, 31))]
+    assert any(six_slot_items(r) for r in routes)
+
+
 def test_rate_limit_retains_only_matching_cached_tournaments(tmp_path,monkeypatch):
     m=match(2)
     m.update(lobbyType='PRACTICE',leagueId=123)
@@ -87,7 +116,7 @@ def test_rate_limit_retains_only_matching_cached_tournaments(tmp_path,monkeypatc
     assert 'Cached tournament' in status and '429' in status
 
 
-def test_tournament_cache_uses_patch_confidence_before_premier_status(tmp_path,monkeypatch):
+def test_tournament_cache_prefers_premier_status_across_patches(tmp_path,monkeypatch):
     current_match,unknown_match=match(1),match(2)
     for m in (current_match,unknown_match):
         m.update(lobbyType='PRACTICE',leagueId=123)
@@ -99,16 +128,17 @@ def test_tournament_cache_uses_patch_confidence_before_premier_status(tmp_path,m
     monkeypatch.setattr(client,'query',lambda *a,**kw:(_ for _ in ()).throw(DataError('STRATZ HTTP 429')))
     updates=[]
     routes,status=tournament_routes(client,1,1,reference_ids=[],on_update=updates.append)
-    assert [r.match_ids[0] for r in routes]==[1,2]
-    assert [r.match_ids[0] for r in updates[0][0]]==[1,2]
+    assert [r.match_ids[0] for r in routes]==[2,1]
+    assert [r.match_ids[0] for r in updates[0][0]]==[2,1]
 
 
-def test_tournament_discovery_checks_current_patch_after_ten_unknown_games(tmp_path,monkeypatch):
+def test_tournament_discovery_keeps_games_across_patches_after_ten_results(tmp_path,monkeypatch):
     client=Stratz(tmp_path,token='test')
     games={}
     for mid in range(1,12):
         m=match(mid)
-        m.update(lobbyType='PRACTICE',leagueId=123,gameVersionId=183 if mid==11 else 182)
+        m.update(lobbyType='PRACTICE',leagueId=123,gameVersionId=183 if mid==11 else 182,
+                 startDateTime=int(time.time())-mid*86400)
         m['players'][0]['stats']['itemPurchases'] += [{'time':900+j,'itemId':ITEMS['branches']['id']} for j in range(mid)]
         games[mid]=m
     monkeypatch.setattr('dota_helper.tournaments.tournament_index',lambda *a:[
@@ -124,4 +154,120 @@ def test_tournament_discovery_checks_current_patch_after_ten_unknown_games(tmp_p
     monkeypatch.setattr(client,'query',query)
     routes,status=tournament_routes(client,1,1,reference_ids=[])
     assert requested==list(range(1,12))
-    assert len(routes)==10 and routes[0].match_ids==[11]
+    assert len(routes)==11 and [r.match_ids[0] for r in routes]==list(range(1,12))
+
+
+def test_tournament_window_includes_sixty_days_rejects_ninety_one_and_queries_cutoff(tmp_path,monkeypatch):
+    recent,expired=match(60),match(91)
+    for days,m in ((60,recent),(91,expired)):
+        m.update(lobbyType='PRACTICE',leagueId=123,startDateTime=int(time.time())-days*86400)
+    index_since=[]
+    def index(client,hero,since,cancel):
+        index_since.append(since)
+        return []
+    monkeypatch.setattr('dota_helper.tournaments.tournament_index',index)
+    client=Stratz(tmp_path,token='test')
+    def query(q,variables=None):
+        if 'leagues(request' in q:
+            assert f'startDateTime:{index_since[0]}' in q
+            return {'constants':{'gameVersions':[{'id':182,'name':'7.40b'}]},
+                    'leagues':[{'id':123,'tier':'PROFESSIONAL','matches':[recent,expired]}]}
+        assert 'match(id:91)' not in q
+        return {'m0':recent}
+    monkeypatch.setattr(client,'query',query)
+    routes,_=tournament_routes(client,1,1,reference_ids=[])
+    assert 0<=time.time()-90*86400-index_since[0]<3601
+    assert index_since[0]%3600==0
+    assert [r.match_ids for r in routes]==[[60]]
+    assert routes[0].patch_label=='7.40b'
+    assert not any('OLDER EXAMPLE' in w or 'PATCH UNVERIFIED' in w for w in routes[0].warnings)
+
+
+def test_tournament_snapshot_uses_ninety_days_not_patch_boundary(tmp_path,monkeypatch):
+    saved=[]
+    for days in (60,91):
+        m=match(days)
+        m.update(lobbyType='PRACTICE',leagueId=123,startDateTime=int(time.time())-days*86400)
+        saved.append(asdict(normalize_stratz(m,m['players'][0],{182:'7.40b'})))
+    (tmp_path/'tournaments-v1-1-1.json').write_text(json.dumps({'routes':saved}))
+    client=Stratz(tmp_path,token='test')
+    monkeypatch.setattr(client,'query',lambda *a,**kw:(_ for _ in ()).throw(DataError('STRATZ HTTP 429')))
+    routes,_=tournament_routes(client,1,1,reference_ids=[])
+    assert [r.match_ids for r in routes]==[[60]]
+
+
+def test_tournament_refresh_keeps_cache_and_separate_identical_build_games(tmp_path, monkeypatch):
+    import re
+    client = Stratz(tmp_path, token='test')
+    cached_game = match(100)
+    cached_game.update(lobbyType='PRACTICE', leagueId=123)
+    cached = normalize_stratz(cached_game, cached_game['players'][0], {})
+    wrong_hero = asdict(cached)
+    wrong_hero.update(id='wrong-hero', hero_id=2, match_ids=[101])
+    wrong_role = asdict(cached)
+    wrong_role.update(id='wrong-role', role=4, match_ids=[102])
+    pub = asdict(cached)
+    pub.update(id='pub', tournament=False, match_ids=[103])
+    snapshot = tmp_path / 'tournaments-v1-1-1.json'
+    snapshot.write_text(json.dumps({'routes':[asdict(cached), wrong_hero, wrong_role, pub]}))
+    games = {}
+    for mid in range(1, 12):
+        game = match(mid)
+        game.update(lobbyType='PRACTICE', leagueId=123)
+        # IDs 1 and 2 deliberately follow the same build; both remain selectable.
+        game['players'][0]['stats']['itemPurchases'] += [
+            {'time':900+j, 'itemId':ITEMS['branches']['id']} for j in range(max(0, mid-2))]
+        games[mid] = game
+    monkeypatch.setattr('dota_helper.tournaments.tournament_index', lambda *a:[
+        dict(match_id=mid, leagueid=123, account_id=42, tier='premium', name='Recorded event') for mid in games])
+    calls = []
+    def query(q, variables=None):
+        if 'itemPurchases' not in q:
+            return {'constants':{'gameVersions':[{'id':182, 'name':PATCHES[-1]['name']}]}}
+        ids = [int(n) for n in re.findall(r'match\(id:(\d+)\)', q)]
+        calls.append(ids)
+        return {f'm{i}':games[mid] for i,mid in enumerate(ids)}
+    monkeypatch.setattr(client, 'query', query)
+    updates = []
+    routes, _ = tournament_routes(client, 1, 1, reference_ids=[], on_update=updates.append)
+    assert calls == [list(range(1, 11)), [11]]
+    assert {r.match_ids[0] for r in routes} == set(range(1, 12)) | {100}
+    assert routes[-1].match_ids == [100]
+    assert all(any(r.match_ids == [100] for r in rows) for rows, _ in updates)
+    assert len(json.loads(snapshot.read_text())['routes']) == 12
+
+
+def test_empty_fresh_tournament_index_preserves_valid_cache(tmp_path, monkeypatch):
+    cached_game = match(100)
+    cached_game.update(lobbyType='PRACTICE', leagueId=123)
+    cached = normalize_stratz(cached_game, cached_game['players'][0], {})
+    snapshot = tmp_path / 'tournaments-v1-1-1.json'
+    snapshot.write_text(json.dumps({'routes':[asdict(cached)]}))
+    client = Stratz(tmp_path, token='test')
+    monkeypatch.setattr(client, 'query', lambda *a, **kw:{'leagues':[]})
+    routes, _ = tournament_routes(client, 1, 1, reference_ids=[])
+    assert [r.match_ids for r in routes] == [[100]]
+    assert len(json.loads(snapshot.read_text())['routes']) == 1
+
+
+def test_tournament_deadline_retains_first_batch_and_reports_remaining_candidates(tmp_path, monkeypatch):
+    import re
+    import time
+    client = Stratz(tmp_path, token='test')
+    games = {mid:match(mid) for mid in range(1, 24)}
+    for game in games.values():
+        game.update(lobbyType='PRACTICE', leagueId=123)
+    monkeypatch.setattr('dota_helper.tournaments.tournament_index', lambda *a:[
+        dict(match_id=mid, leagueid=123, account_id=42, tier='premium', name='Recorded event') for mid in games])
+    calls = []
+    def bounded(jobs, q, variables=None):
+        if 'itemPurchases' not in q:
+            return {'constants':{'gameVersions':[{'id':182, 'name':PATCHES[-1]['name']}]}}
+        mids = [int(n) for n in re.findall(r'match\(id:(\d+)\)', q)]
+        calls.append(mids)
+        jobs.deadline = time.monotonic() - 1
+        return {f'm{i}':games[mid] for i,mid in enumerate(mids)}
+    monkeypatch.setattr(client, 'bounded', bounded)
+    routes, status = tournament_routes(client, 1, 1, reference_ids=[])
+    assert len(routes) == 10 and calls == [list(range(1, 11))]
+    assert 'deadline' in status

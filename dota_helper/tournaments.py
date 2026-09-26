@@ -1,16 +1,16 @@
 """Tournament-only recommendations; never fill missing slots with ranked pubs."""
-from datetime import datetime
 from dataclasses import asdict
 import json
 import uuid
 import threading
 import time
 
-from .catalog import HEROES, PATCHES
+from .catalog import HEROES
 from .fast_lookup import DeadlineJobs
 from .providers import DataError, OpenDota
 from .models import Route, Purchase
-from .ranking import patch_group, ranked, route_key
+from .ranking import ranked
+from .recency import RECENT_DAYS, cutoff, in_recent_window
 from .stratz import Stratz, SUMMARY, PLAYER, references, reference_query, normalize_stratz
 
 TIERS = ('PROFESSIONAL','MINOR','MAJOR','INTERNATIONAL','DPC_QUALIFIER',
@@ -38,7 +38,8 @@ def tournament_index(client, hero, since, cancel):
 
 def tournament_player(match, player, hero, role, since):
     return (match.get('lobbyType') == 'PRACTICE' and (match.get('leagueId') or 0)>0
-            and since <= match.get('startDateTime',0) <= time.time()
+            and in_recent_window(match.get('startDateTime'))
+            and since <= match['startDateTime']
             and player.get('heroId')==hero and player.get('position')==f'POSITION_{role}'
             and bool(player.get('steamAccountId')))
 
@@ -51,7 +52,9 @@ def tournament_routes(client, hero, role, progress=lambda _:None, cancel=None, o
     if deadline is not None:
         jobs.deadline=min(jobs.deadline,deadline)
     start=time.monotonic()
-    since=int(datetime.fromisoformat(PATCHES[-1]['date'].replace('Z','+00:00')).timestamp())
+    # Keep the query cache reusable between searches while validating the exact
+    # rolling window on every returned game and snapshot entry.
+    since=int(cutoff())//3600*3600
     refs=references(hero) if reference_ids is None else reference_ids[:10]
     snapshot=client.cache_dir/f'tournaments-v1-{hero}-{role}.json'
     fallback=[]
@@ -60,7 +63,7 @@ def tournament_routes(client, hero, role, progress=lambda _:None, cancel=None, o
         for record in saved['routes']:
             record['purchases']=[Purchase(**p) for p in record['purchases']]
             route=Route(**record)
-            if route.tournament and route.hero_id==hero and route.role==role and since<=route.start_time<=time.time():
+            if route.tournament and route.hero_id==hero and route.role==role and in_recent_window(route.start_time):
                 fallback.append(route)
         fallback = ranked(fallback)
         if fallback and on_update:
@@ -69,7 +72,7 @@ def tournament_routes(client, hero, role, progress=lambda _:None, cancel=None, o
         fallback=[]
     index_rows=[]
     index_failure=''
-    progress('Finding premier tournament matches in the bundled patch-date window…')
+    progress(f'Finding premier tournament matches from the last {RECENT_DAYS} days…')
     if jobs.submit('tournament-index',lambda:tournament_index(client,hero,since,cancel)):
         event=jobs.next()
         if event:
@@ -79,7 +82,7 @@ def tournament_routes(client, hero, role, progress=lambda _:None, cancel=None, o
                 index_failure=str(error)
     query=('{constants {gameVersions{id name}} '+reference_query(refs)
            +' leagues(request:{tiers:['+','.join(TIERS)+'],take:20}){id name tier '
-           +f'matches(request:{{heroIds:[{hero}],positionIds:[POSITION_{role}],take:10,skip:0,startDateTime:{since}}})'
+           +f'matches(request:{{heroIds:[{hero}],positionIds:[POSITION_{role}],take:50,skip:0,startDateTime:{since}}})'
            +'{'+SUMMARY+' players{'+PLAYER+'}}}}')
     # The broader index supplies IDs; STRATZ still validates role, league and build data.
     if index_rows:
@@ -116,15 +119,15 @@ def tournament_routes(client, hero, role, progress=lambda _:None, cancel=None, o
                 if tournament_player(match,player,hero,role,since):
                     discovered.append((match,player,league.get('name') or f"League {league['id']}"))
     candidates+=sorted(discovered,key=lambda x:x[0]['startDateTime'],reverse=True)
-    routes=[]
+    routes=list(fallback)
+    discovered_routes=[]
     attempted=set()
-    signatures={}
     rejected=0
     failure=''
-    while candidates and sum(patch_group(route) == 2 for route in routes)<10 and time.monotonic()<jobs.deadline and not cancel.is_set():
+    while candidates and time.monotonic()<jobs.deadline and not cancel.is_set():
         selected={}
-        slots = 10 - sum(patch_group(route) == 2 for route in routes)
-        while candidates and len(selected)<slots:
+        # Keep each API request bounded without limiting the overall game list.
+        while candidates and len(selected)<10:
             match,player,name=candidates.pop(0)
             if match['id'] not in attempted:
                 selected[match['id']]=(player,name,match['leagueId'])
@@ -147,25 +150,20 @@ def tournament_routes(client, hero, role, progress=lambda _:None, cancel=None, o
                 continue
             route.evidence=f'TOURNAMENT · {name} · no pub MMR'
             route.warnings.insert(0,'Tournament-only source. '+name+'. Ranked pub games are never substituted.')
-            signature=(tuple(p.key for p in route.purchases),tuple(route.skills))
-            previous = signatures.get(signature)
-            if previous is not None and route_key(previous) >= route_key(route):
-                rejected+=1
-                continue
-            signatures[signature] = route
-        routes = ranked(signatures.values())
+            discovered_routes.append(route)
+        routes = ranked(fallback + discovered_routes)
         if routes and on_update:
             on_update((list(routes),f'{len(routes)} tournament builds ready · ranked pubs excluded'))
     if cancel.is_set():
         raise DataError('Search cancelled')
-    if candidates and sum(patch_group(route) == 2 for route in routes)<10 and not failure:
+    if candidates and not failure:
         failure='Search deadline reached; retry uses cached responses.'
-    status=f'{len(routes)} tournament builds in {time.monotonic()-start:.2f}s · ranked pubs excluded · {rejected} unavailable/duplicate builds. '
+    status=f'{len(routes)} tournament games in {time.monotonic()-start:.2f}s · ranked pubs excluded · {rejected} unavailable builds. '
     if not routes:
         status+='No usable tournament games in the available index/reference sample. '
-    status+=failure+' Patch evidence may be unverified; tournament coverage is incomplete.'
+    status+=failure+' Tournament coverage is incomplete.'
     if index_rows:
-        status+=' OpenDota match index + STRATZ builds; bundled patch-date window. Patch confidence first, then premier events and newest games.'
+        status+=f' OpenDota match index + STRATZ builds; up to 30 indexed candidates from the last {RECENT_DAYS} days. Premier events first, then newest games across patches.'
     elif index_failure:
         status+=' Limited STRATZ directory fallback: '+index_failure
     if routes:

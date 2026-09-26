@@ -1,0 +1,91 @@
+name: Build Windows release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example v0.1.14)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate version and install dependencies
+        shell: pwsh
+        run: |
+          python scripts/check-release-version.py
+          if ($LASTEXITCODE -ne 0) { throw 'Release version mismatch' }
+          "DOTA_HELPER_HOME=$env:RUNNER_TEMP/dota-helper-release" >> $env:GITHUB_ENV
+          python -m venv .venv
+          .venv/Scripts/python -m pip install -r requirements.lock.txt pyinstaller==6.22.2 pyinstaller-hooks-contrib==2026.7
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          .venv/Scripts/python -m pip install --no-deps -e .
+          if ($LASTEXITCODE -ne 0) { throw 'App installation failed' }
+      - name: Unit and UI tests
+        run: |
+          .venv/Scripts/python -m pytest -q --ignore=tests/test_history.py
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          .venv/Scripts/python -m pytest -q tests/test_history.py
+          if ($LASTEXITCODE -ne 0) { throw 'History tests failed' }
+      - name: Build and verify executable
+        run: |
+          ./build-exe.ps1
+          ./scripts/verify-exe.ps1
+      - name: Install Inno Setup
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+      - name: Build and verify installer
+        run: |
+          ./build-installer.ps1
+          ./scripts/verify-installer.ps1
+          $lines = @('DotaBuildHelper-Setup.exe', 'DotaBuildHelper.exe') | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "dist/$_").Hash.ToLowerInvariant()
+            "$hash  $_"
+          }
+          $lines | Set-Content -LiteralPath dist/SHA256SUMS.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ env.RELEASE_TAG }}
+          path: |
+            dist/DotaBuildHelper-Setup.exe
+            dist/DotaBuildHelper.exe
+            dist/SHA256SUMS.txt
+      - name: Create draft release for owner review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Published releases are immutable. Bump the version.' }
+            gh release upload $env:RELEASE_TAG dist/DotaBuildHelper-Setup.exe dist/DotaBuildHelper.exe dist/SHA256SUMS.txt --clobber
+          } else {
+            gh release create $env:RELEASE_TAG dist/DotaBuildHelper-Setup.exe dist/DotaBuildHelper.exe dist/SHA256SUMS.txt --draft --verify-tag --title "Dota Build Helper $env:RELEASE_TAG" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release upload failed' }
