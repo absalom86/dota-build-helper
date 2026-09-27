@@ -20,7 +20,7 @@ The compact spell reference uses five rows with two spells per row, with each re
 
 ### Kez combo reference
 
-Selecting Kez shows a compact card beside the build, with all three stages available. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
+Selecting Kez shows a compact card beside the build, with all three stages available. Every combo begins with **Start in Sai** or **Start in Katana**, describing the form before the first key; an opening D switches out of that form. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
 
 These use **default QWER keys**, with **D = Switch Discipline** and **attack = right-click**. Begin in the stated stance with every required ability learned and ready. Custom bindings, current stance, cooldowns and Scepter ownership are not detected by this reference; the final two combos require Aghanim's **Scepter**, not Shard.
 

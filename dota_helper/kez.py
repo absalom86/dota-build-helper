@@ -61,9 +61,9 @@ def reference_html(columns=2):
     for heading, combos in STAGES:
         rows.append(f'<b style="color:#dcaa63">{escape(heading)}</b>')
         for combo in combos:
-            rows.append(f'<b>{escape(combo.stance)}</b>: '
+            rows.append(f'<b>Start in {escape(combo.stance)}</b>: '
                         f'<span style="color:#92cbff">{escape(combo.keys)}</span>')
-    rows.append('<span style="color:#97a6b7">Start in the named stance; skills ready. '
+    rows.append('<span style="color:#97a6b7">Requires learned, ready skills. '
                 'Parry / mark = wait for success.<br>'
                 'Scepter: first spell within 3s of D; each spell refreshes D.</span>')
     rows.append('<b>Katana / Sai</b><br>'
