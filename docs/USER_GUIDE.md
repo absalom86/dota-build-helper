@@ -20,9 +20,9 @@ The compact spell reference uses five rows with two spells per row, with each re
 
 ### Kez combo reference
 
-Selecting Kez shows a compact card beside the build, with all three stages available. The **Sai:** or **Katana:** label identifies your starting form, before the first key; an opening D switches out of that form. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
+Selecting Kez shows a compact card beside the build, with nine sequences grouped into early game, mid game, Scepter and defense. The **Sai:** or **Katana:** label identifies your starting form, before the first key; an opening D switches out of that form. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
 
-These use **default QWER keys**, with **D = Switch Discipline** and **attack = right-click**. Begin in the stated stance with every required ability learned and ready. Custom bindings, current stance, cooldowns and Scepter ownership are not detected by this reference; the final two combos require Aghanim's **Scepter**, not Shard.
+These use **default QWER keys**, with **D = Switch Discipline** and **attack = right-click**. Begin in the stated stance with every required ability learned and ready. Custom bindings, current stance, cooldowns and Scepter ownership are not detected by this reference. Only the three sequences under **After Aghanim's Scepter** require Scepter; both defensive sequences work without it. Shard does not substitute for Scepter.
 
 | Stage / purpose | Start | Sequence |
 | --- | --- | --- |
@@ -32,6 +32,9 @@ These use **default QWER keys**, with **D = Switch Discipline** and **attack = r
 | Mid: fight / heal | Katana | Q → W → R |
 | Scepter: Rush + Echo | Katana | D → Q → D → Q → attack |
 | Scepter: silence engage | Katana | D → W → D → W → D → Q → D → Q |
+| Scepter: Veil + Echo + Dance | Katana | D → R → wait for mark → D → Q → R |
+| Defense: Grapple + Veil escape | Katana | W (tree) → land → D → R |
+| Defense: Dance + retreat | Katana | R → finish → W (tree) |
 
 For the parry, face the attacker and wait for a successful block. For Q → W, begin within Echo Slash range and Grapple after the first slash; Raptor Dance supplies area damage and healing. Without Scepter, corresponding ability slots share cooldowns. With Scepter, cast the first spell within three seconds after each switch to preserve the paired ability's cooldown; weapon spells refresh D. Abilities already cooling down are not refreshed. Katana E is a baseline active ability; Shard upgrades it and the parry.
 
@@ -44,6 +47,10 @@ For the parry, face the attacker and wait for a successful block. For Q → W, b
 5. **Attack:** right-click to follow up while Rush remains active.
 
 This is a short damage combo. The opening D is necessary for the Scepter protection; simply starting in Sai and pressing Q can put Echo Slash on cooldown. Position within Echo Slash range before the second Q. The short sequence provides neither a silence nor a mark. The longer **silence engage** starts with Talon Toss and Grappling Claw to silence and approach the target, then uses the same Rush/Echo combination. These spell sequences still require aiming and appropriate targets; they are not a promise that every hit will connect.
+
+**Ultimate combination:** with Scepter, **Katana D → R → mark → D → Q → R** uses Raven's Veil, Echo Slash and Raptor Dance. Cast Veil as the first spell within three seconds of the opening switch so Dance stays available. Let Veil's mark reach the target, switch back, and use Echo to trigger the mark before Dance. Begin close enough for Dance; it heals from damage dealt and does not guarantee that enemies stay in range.
+
+**Defensive retreats:** **Katana W (tree) → land → D → R** grapples toward safety, then uses Veil's basic dispel, movement speed and invisibility to retreat. Let the grapple finish before switching and casting Veil, then move away without attacking or casting: those actions break invisibility, and detection can still reveal you. **Katana R → finish → W (tree)** uses Dance near enemies, then grapples away after it completes. Dance's healing requires damage to targets; casting it away from enemies is not a free heal. Both sequences need a reachable tree, enough mana and ready abilities. These short retreats are practical combinations derived from the ability mechanics, not measured popularity data.
 
 The card abbreviates the Katana/Sai pairs as **Echo/Rush**, **Claw/Toss**, **Impale/Parry** and **Dance/Veil**. Full names are Echo Slash/Falcon Rush, Grappling Claw/Talon Toss, Kazurai Katana/Shodo Sai and Raptor Dance/Raven's Veil.
 

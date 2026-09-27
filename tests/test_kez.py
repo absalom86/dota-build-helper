@@ -36,7 +36,7 @@ def plain_reference(columns):
 @pytest.mark.parametrize('columns', [1, 2])
 def test_reference_explains_stages_stances_and_default_keys(columns):
     text = plain_reference(columns)
-    for heading in ('EARLY GAME', 'MID GAME', 'AGHANIM'):
+    for heading in ('EARLY GAME', 'MID GAME', 'AGHANIM', 'DEFENSE'):
         assert heading in text.upper()
     for instruction in ('Katana', 'Sai', 'Q Echo / Rush', 'W Claw / Toss',
                         'E Impale / Parry', 'R Dance / Veil'):

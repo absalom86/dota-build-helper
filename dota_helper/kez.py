@@ -28,6 +28,11 @@ STAGES = (
     ("AFTER AGHANIM’S SCEPTER", (
         Combo('Katana', 'D → Q → D → Q → attack', 'Rush + Echo'),
         Combo('Katana', 'D → W → D → W → D → Q → D → Q', 'Silence engage'),
+        Combo('Katana', 'D → R → mark → D → Q → R', 'Veil + Echo + Dance'),
+    )),
+    ('DEFENSE · NO SCEPTER', (
+        Combo('Katana', 'W (tree) → land → D → R', 'Grapple + Veil escape'),
+        Combo('Katana', 'R → finish → W (tree)', 'Dance + retreat'),
     )),
 )
 
@@ -51,12 +56,23 @@ DETAILS = (
     'Be in Echo Slash range before casting it; this short sequence has no silence or mark.\n'
     'Silence engage: switch to Sai for Talon Toss, Katana for Grappling Claw, '
     'Sai for Falcon Rush, then Katana for Echo Slash; follow with attacks.\n'
+    'Veil + Echo + Dance (Scepter): start close enough for Raptor Dance. '
+    'Switch to Sai, cast Raven’s Veil, wait for its mark to reach the target, '
+    'switch to Katana, then Echo Slash to trigger the mark and Raptor Dance. '
+    'Veil must be the first spell within 3 seconds of the opening switch to leave Dance ready.\n'
+    'Grapple + Veil escape: in Katana, use Grappling Claw on a tree toward safety. '
+    'Land before switching to Sai and casting Raven’s Veil, then move away. '
+    'Further attacks or spells break invisibility; detection can still reveal you.\n'
+    'Dance + retreat: in Katana, cast Raptor Dance near enemies; finish the Dance '
+    'before using Grappling Claw on a tree toward safety. Healing depends on damage dealt. '
+    'Both retreats work without Scepter and require a reachable tree and ready abilities.\n'
     'Scepter combos: after each switch, cast the first spell within 3 seconds. '
     'The opening switch is deliberate: it lets Falcon Rush leave Echo Slash ready. '
     'The protected spell does not trigger its paired cooldown; '
     'casting a weapon spell refreshes Switch Discipline. '
     'Abilities already on cooldown are not refreshed.\n'
-    'These are practice sequences, not live cooldown or target detection. '
+    'Land / finish = let Grapple / Dance complete. These are practice sequences, '
+    'not live cooldown or target detection. '
     'No inputs are sent to Dota. Mechanics checked 27 September 2026.'
 )
 
@@ -71,8 +87,7 @@ def reference_html(columns=2):
         for combo in combos:
             rows.append(f'<b>{escape(combo.stance)}</b>: '
                         f'<span style="color:#92cbff">{escape(combo.keys)}</span>')
-    rows.append('<span style="color:#97a6b7">Requires learned, ready skills. '
-                'Parry / mark = wait for success.<br>'
+    rows.append('<span style="color:#97a6b7">Ready skills. Wait for parry/mark.<br>'
                 'Scepter: first spell within 3s of D; each spell refreshes D.</span>')
     rows.append('<b>Katana / Sai</b><br>'
                 'Q Echo / Rush · W Claw / Toss<br>'

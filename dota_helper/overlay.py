@@ -203,7 +203,7 @@ class Overlay(QWidget):
             right = inner-2*gap-2*column
             middle = [self.initial_buy, self.components, self.supplies]
             references = [self.invoker_spells, self.kez_combos]
-            # Kez has three combo stages. Give that reference its own column
+            # Kez has several combo sections. Give that reference its own column
             # and use the spare space below early purchases for talent picks.
             if self.kez_active:
                 middle.append(self.talents)
