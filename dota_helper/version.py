@@ -1,2 +1,2 @@
 """Version embedded in both the source app and the packaged executable."""
-VERSION = '0.1.16'
+VERSION = '0.1.17'
