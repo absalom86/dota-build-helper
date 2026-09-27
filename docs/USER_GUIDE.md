@@ -18,6 +18,27 @@ Selecting Invoker manually or receiving his confirmed hero from game state shows
 
 The compact spell reference uses five rows with two spells per row, with each recipe above its full spell name. When the overlay uses a wider, split layout, the reference uses one column beside the build. All ten recipes remain available without scrolling. The table is hidden while draft recommendations are displayed or another hero is selected.
 
+### Kez combo reference
+
+Selecting Kez shows a compact card beside the build, with all three stages available. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
+
+These use **default QWER keys**, with **D = Switch Discipline** and **attack = right-click**. Begin in the stated stance with every required ability learned and ready. Custom bindings, current stance, cooldowns and Scepter ownership are not detected by this reference; the final two combos require Aghanim's **Scepter**, not Shard.
+
+| Stage / purpose | Start | Sequence |
+| --- | --- | --- |
+| Early: parry trade | Sai | E → successful parry → D → Q |
+| Early: chase | Sai | Q → D → W → attack |
+| Mid: marked burst | Sai | R → wait for the mark → D → Q → W → attack |
+| Mid: fight / heal | Katana | Q → W → R |
+| Scepter: Rush + Echo | Katana | D → Q → D → Q → attack |
+| Scepter: silence engage | Katana | D → W → D → W → D → Q → D → Q |
+
+For the parry, face the attacker and wait for a successful block. For Q → W, begin within Echo Slash range and Grapple after the first slash; Raptor Dance supplies area damage and healing. Without Scepter, corresponding ability slots share cooldowns. With Scepter, cast the first spell within three seconds after each switch to preserve the paired ability's cooldown; weapon spells refresh D. Abilities already cooling down are not refreshed. Katana E is a baseline active ability; Shard upgrades it and the parry.
+
+The card abbreviates the Katana/Sai pairs as **Echo/Rush**, **Claw/Toss**, **Impale/Parry** and **Dance/Veil**. Full names are Echo Slash/Falcon Rush, Grappling Claw/Talon Toss, Kazurai Katana/Shodo Sai and Raptor Dance/Raven's Veil.
+
+These are curated practice sequences, not measured popularity rankings or automatic inputs. Mechanics were checked against [Valve's Kez data](https://www.dota2.com/hero/kez) on 27 September 2026; combo references are [Chili's carry guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3460471608) and [Brain Damage's Falconer's Cookbook](https://steamcommunity.com/sharedfiles/filedetails/?id=3513065509). Guide advice can age between patches; follow the current in-game ability descriptions.
+
 ### Use a selected build in Dota's shop
 
 1. Select a game/build, review its starting-quantity preview, then click **Export to Dota shop…** below it.

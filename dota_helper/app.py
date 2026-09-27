@@ -34,7 +34,7 @@ from .skill_display import overlay_skill_text, skill_order_html
 from .endgame import six_slot_items, six_slot_text, endgame_examples
 from .builds import overlay_sections, starting_buy_text
 from . import starting_items
-from . import guides, invoker
+from . import guides, invoker, kez
 from .overlay import Overlay, route_identity, purchase_summary
 from .overlay_content import near_term_purchases
 from .lane_timers import LaneTimers
@@ -1611,6 +1611,7 @@ class MainWindow(QMainWindow):
                                  f"API: {self.api_status}\nMetadata snapshot: bundled OpenDota constants; patch {patch_name(PATCHES[-1]['id'])}")
         draft_text = self.draft.overlay_text()
         self.overlay.show_invoker(self.hero.currentData() == invoker.HERO_ID and not draft_text)
+        self.overlay.show_kez(self.hero.currentData() == kez.HERO_ID and not draft_text)
         self.export_guide_button.setEnabled(route is not None)
         timer_text=self.lane_timers.text(second,clock_status,self.role.currentData(),
                                         HEROES.get(str(self.hero.currentData()),{}),bool(draft_text))

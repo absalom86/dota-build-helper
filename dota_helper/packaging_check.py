@@ -13,7 +13,7 @@ def run(report_path):
     from .detection import capture
     from .draft import rank_picks
     from .providers import LOCAL
-    from . import guides, invoker, starting_items
+    from . import guides, invoker, kez, starting_items
     from .credentials import load_token
     import mss
 
@@ -59,6 +59,14 @@ def run(report_path):
                 'items': {'slot0': {'name': 'item_tango', 'charges': 2}}})
             assert window.session.inventory['tango'] == 1 and window.session.inventory_charges['tango'] == 2
             assert window.session.field_status('inventory') == 'fresh' and window.session.field_status('skills') == 'missing'
+            window.hero.setCurrentIndex(window.hero.findData(kez.HERO_ID))
+            window.tick()
+            window.overlay.fit_content(QRect(0, 0, 1280, 720))
+            assert window.overlay.fit_ok and not window.overlay.kez_combos.isHidden()
+            assert window.overlay.invoker_spells.isHidden()
+            assert all(combo.keys in window.overlay.kez_combos.text()
+                       for _, combos in kez.STAGES for combo in combos)
+            window.overlay.grab().save(str(report.with_name(f'{report.stem}-kez.png')))
             from .setup_ui import SetupDialog
             from . import game_setup
             # Only a disposable fixture is written; never configure or launch the real game.
@@ -104,7 +112,8 @@ def run(report_path):
                 window.grab().save(str(report.with_name(f'{report.stem}-mmr-{entry["hero"]}-{entry["role"]}.png')))
             result.update(ok=True, frozen=bool(getattr(sys, "frozen", False)), heroes=len(HEROES),
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
-                          invoker_spells=len(invoker.SPELLS), shop_guide_export=True, overlay_fit=True,
+                          invoker_spells=len(invoker.SPELLS), kez_combos=sum(len(c) for _, c in kez.STAGES),
+                          shop_guide_export=True, overlay_fit=True,
                           quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
                           saved_mmr_routes_checked=saved_mmr,
                           credential_available=bool(load_token()),

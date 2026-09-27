@@ -5,7 +5,7 @@ import time
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QSizeGrip, QScrollBar, QWidget
 
-from . import invoker
+from . import invoker, kez
 from .catalog import clock_text, item_name
 from .recency import neutral_patch_label
 from .ratings import rating_text
@@ -63,6 +63,7 @@ class Overlay(QWidget):
         self.origin = None
         self.locked = False
         self.invoker_active = False
+        self.kez_active = False
         self.fit_ok = True
         self.fit_message = ''
         self.item_lines = None
@@ -98,14 +99,19 @@ class Overlay(QWidget):
         self.talents = label()
         self.invoker_spells = label()
         self.invoker_spells.setTextFormat(Qt.TextFormat.RichText)
+        self.kez_combos = label()
+        self.kez_combos.setTextFormat(Qt.TextFormat.RichText)
+        self.kez_combos.setToolTip(kez.DETAILS + '\n\nKatana / Sai:\n' + '\n'.join(
+            f'{key}: {katana} / {sai}' for key, katana, sai in kez.KEYS))
         self.note = label('', True)
         self.lane_timers = label('', True)
         self.labels = [self.title, self.hero, self.route_label, self.clock, self.initial_buy,
                        self.components, self.supplies, self.items, self.skill, self.talents,
-                       self.invoker_spells, self.note, self.lane_timers]
+                       self.invoker_spells, self.kez_combos, self.note, self.lane_timers]
         for widget in self.labels:
             widget.setMinimumWidth(0)
-        for widget in (self.initial_buy, self.components, self.supplies, self.talents, self.invoker_spells):
+        for widget in (self.initial_buy, self.components, self.supplies, self.talents,
+                       self.invoker_spells, self.kez_combos):
             widget.hide()
         self.title.hide()
         self.grip = QSizeGrip(self)
@@ -121,6 +127,18 @@ class Overlay(QWidget):
     def show_invoker(self, enabled):
         self.invoker_active = enabled
         self.invoker_spells.setVisible(enabled)
+        if enabled:
+            self.show_kez(False)
+
+    def show_kez(self, enabled):
+        self.kez_active = enabled
+        self.kez_combos.setVisible(enabled)
+        if enabled:
+            self.show_invoker(False)
+
+    def _reference_text(self, split):
+        self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
+        self.kez_combos.setText(kez.reference_html(columns=1 if split else 2))
 
     def set_item_lines(self, lines):
         """Rows are (plain text, completed); markup never comes from a provider."""
@@ -152,6 +170,7 @@ class Overlay(QWidget):
         self.skill.setStyleSheet(f'font-size:{size+1}px; font-weight:600; color:#f0dcff; '
                                 'background:#2a2638; padding:5px; border-left:3px solid #bda0df;')
         self.invoker_spells.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
+        self.kez_combos.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
         for widget in self.labels:
             widget.ensurePolished()
 
@@ -182,19 +201,27 @@ class Overlay(QWidget):
         if split == 3:
             column = (inner-2*gap)//3
             right = inner-2*gap-2*column
+            middle = [self.initial_buy, self.components, self.supplies]
+            references = [self.invoker_spells, self.kez_combos]
+            # Kez has three combo stages. Give that reference its own column
+            # and use the spare space below early purchases for talent picks.
+            if self.kez_active:
+                middle.append(self.talents)
+            else:
+                references.insert(0, self.talents)
             y = max(stack([self.skill, self.items], margin, y, column),
-                    stack([self.initial_buy, self.components, self.supplies], margin+column+gap, y, column),
-                    stack([self.talents, self.invoker_spells],
+                    stack(middle, margin+column+gap, y, column),
+                    stack(references,
                           margin+2*(column+gap), y, right))
         elif split:
             left = (inner-gap)//2
             right = inner-gap-left
             y = max(stack([self.components, self.supplies, self.items], margin, y, left),
-                    stack([self.initial_buy, self.skill, self.talents, self.invoker_spells],
+                    stack([self.initial_buy, self.skill, self.talents, self.invoker_spells, self.kez_combos],
                           margin+left+gap, y, right))
         else:
             y = stack([self.skill, self.components, self.supplies, self.items, self.talents,
-                       self.invoker_spells], margin, y, inner)
+                       self.invoker_spells, self.kez_combos], margin, y, inner)
         y = stack([self.note, self.lane_timers], margin, y, inner)
         return placements, y + margin + (0 if self.locked else 12)
 
@@ -214,14 +241,16 @@ class Overlay(QWidget):
         max_width = min(bounds.width()-16, 600)
         preferred = min(self.preferred_width, max_width)
         key = (preferred, self.font_size, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
-               y, self.locked, self.invoker_active,
-               tuple((widget.text(), widget.isHidden()) for widget in self.labels if widget is not self.invoker_spells))
+               y, self.locked, self.invoker_active, self.kez_active,
+               tuple((widget.text(), widget.isHidden()) for widget in self.labels
+                     if widget not in (self.invoker_spells, self.kez_combos)))
         if key == self._fit_key:
             return
         # Draft suggestions live in one label. Narrowing that label into a build
         # column merely adds wrapping while leaving the other columns empty.
         auxiliary = any(not w.isHidden() and w.text() for w in
-                        (self.initial_buy, self.components, self.supplies, self.talents, self.invoker_spells))
+                        (self.initial_buy, self.components, self.supplies, self.talents,
+                         self.invoker_spells, self.kez_combos))
         widths = list(range(preferred, max_width+1, 30))
         if max_width not in widths:
             widths.append(max_width)
@@ -237,7 +266,7 @@ class Overlay(QWidget):
             self._style_labels(size)
             measured = []
             for width, split in candidates:
-                self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
+                self._reference_text(split)
                 placements, height = self._arrange(width, split)
                 measured.append((width, height, placements, split, size))
             layouts.extend(measured)
@@ -251,7 +280,7 @@ class Overlay(QWidget):
             selected = min(fitting, key=lambda v: (-v[4], v[0], v[1])) if fitting else min(layouts, key=lambda v: v[1])
         width, content_height, placements, split, size = selected
         self._style_labels(size)
-        self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
+        self._reference_text(split)
         height = min(content_height, bounds.height()-16)
         y = max(bounds.top()+8, min(y, bounds.bottom()-height-8))
         self.fit_ok = content_height <= height
