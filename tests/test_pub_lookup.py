@@ -158,13 +158,16 @@ def test_new_pub_discovery_loads_more_than_ten_without_relaxing_detail_checks(tm
     from dota_helper.catalog import PATCHES
     client = OpenDota(tmp_path)
     calls, updates = [], []
+    # Worker fixtures must describe already-started games. Fresh wall-clock
+    # timestamps can cross a second boundary after discovery captured its cutoff.
+    started = int(time.time()) - 3600
     monkeypatch.setattr(client, 'cached', lambda *args, **kwargs: None)
     def get(path, **kwargs):
         calls.append(path)
         if path == 'explorer':
-            return {'rows': [row(mid) for mid in range(1, 21)]}
+            return {'rows': [dict(row(mid), start_time=started - mid) for mid in range(1, 21)]}
         game = match(int(path.split('/')[-1]))
-        game.update(lobby_type=7, leagueid=0)
+        game.update(lobby_type=7, leagueid=0, start_time=started - game['match_id'])
         if game['match_id'] == 19:
             game['leagueid'] = 42
         elif game['match_id'] == 20:
