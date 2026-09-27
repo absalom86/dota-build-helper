@@ -216,12 +216,74 @@ def test_manual_lookup_supplies_only_selected_hero_mmr_candidates(window, monkey
     jobs, captured = [], []
     window.launch_worker = lambda *args, **kwargs: jobs.append(args)
     def lookup(client, actual_hero, role, *args):
-        captured.append((actual_hero, role, client.rated_candidates))
+        assert not getattr(client, 'rated_candidates', [])
         return [], 'Fixture complete'
+    def mmr_lookup(client, actual_hero, role, candidates, progress, cancel, deadline, on_update):
+        captured.append((actual_hero, role, candidates))
+        assert deadline - time.monotonic() > 7  # independent of ordinary lookup's remaining time
+        return [], 'Fixture MMR complete'
     monkeypatch.setattr('dota_helper.recommendations.recommended_routes', lookup)
+    monkeypatch.setattr('dota_helper.rated_builds.rated_routes', mmr_lookup)
     window.fetch(force=True)
+    assert len(jobs) == 2
     result = jobs[0][0](lambda _: None, lambda _: None)
     jobs[0][1](result)
+    result = jobs[1][0](lambda _: None, lambda _: None)
+    jobs[1][1](result)
     assert captured[0][:2] == (hero, window.role.currentData())
-    assert [entry['match_id'] for entry in captured[0][2]] == [501]
+    assert [entry['match_id'] for entry in captured[0][2]] == [501, 503]
     assert captured[0][2][0]['average_mmr'] == 9100
+
+
+def test_resolved_mmr_build_is_displayed_selected_and_saved_while_normal_lookup_runs(window):
+    from dota_helper.history import decode
+    hero = window.hero.currentData()
+    window.live_ratings.records = {'502': dict(observation(8352), hero_ids=[hero])}
+    window.routes = routes()[:1]
+    window.render_routes()
+    original = window.current_route().id
+    window.session.choose(original)
+    window.fetching = True
+    jobs = []
+    window.launch_worker = lambda *args, **kwargs: jobs.append(args)
+    window.lookup_rated_builds()
+    assert len(jobs) == 1 and window.mmr_lookup_busy
+    route = routes()[1]
+    route.average_mmr = 8352
+    route.average_mmr_source = SOURCE
+    jobs[0][1](([route], 'MMR build ready'))
+    assert not window.mmr_lookup_busy and window.fetching
+    assert window.match_table.item(0, 0).text() == '8,352'
+    assert window.current_route().id == original  # preserve chosen guide
+    window.match_table.setCurrentCell(0, 0)
+    window.route_choice.setCurrentIndex(0)
+    window.select_route()
+    assert window.current_route().average_mmr == 8352
+    saved = decode(window.history.find(hero, window.role.currentData(), 0))
+    assert saved[0].average_mmr == 8352 and saved[0].average_mmr_source == SOURCE
+    window.fetching = False
+
+
+def test_mmr_results_for_previous_hero_are_discarded(window):
+    hero = window.hero.currentData()
+    window.live_ratings.records = {'502': dict(observation(8352), hero_ids=[hero])}
+    jobs = []
+    window.launch_worker = lambda *args, **kwargs: jobs.append(args)
+    window.lookup_rated_builds()
+    window.hero.setCurrentIndex(window.hero.findData(2 if hero != 2 else 1))
+    jobs[0][1](([routes()[1]], 'Old hero complete'))
+    assert not window.routes and not window.mmr_lookup_busy
+
+
+def test_first_feed_arrival_resolves_candidates_after_initial_search(window):
+    window.services_started = True
+    jobs = []
+    window.launch_worker = lambda *args, **kwargs: jobs.append(args)
+    window.refresh_live_ratings()
+    window.lookup_rated_builds()
+    assert window.mmr_lookup_pending and len(jobs) == 1
+    hero = window.hero.currentData()
+    window.live_ratings.records = {'502': dict(observation(8352), hero_ids=[hero])}
+    jobs[0][1](SimpleNamespace(status='Feed ready', error=None))
+    assert len(jobs) == 2 and window.mmr_lookup_busy and not window.mmr_lookup_pending
+    jobs[1][1](([], 'No completed matches'))

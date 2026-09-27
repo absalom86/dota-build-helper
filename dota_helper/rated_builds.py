@@ -33,7 +33,7 @@ def rated_routes(client, hero, role, candidates, progress, cancel, deadline, on_
             mmr = numeric_mmr(candidate.get('average_mmr'))
         except OverflowError:
             mmr = None
-        if mid and mmr is not None and mmr >= 7000 and observed is not None and now - MAX_AGE <= observed <= now + 300:
+        if mid and mmr is not None and observed is not None and now - MAX_AGE <= observed <= now + 300:
             records[int(mid)] = {'average_mmr': mmr, 'observed_at': observed}
     pending = sorted(records, key=lambda mid: (records[mid]['average_mmr'], records[mid]['observed_at']), reverse=True)
     routes, skipped, checked = [], Counter(), 0

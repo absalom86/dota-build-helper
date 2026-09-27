@@ -164,7 +164,7 @@ def test_only_completed_eligible_exact_games_supply_builds(tmp_path, install_gam
 
 @pytest.mark.parametrize('changes', [
     {'match_id': True}, {'match_id': 501.5}, {'average_mmr': None},
-    {'average_mmr': True}, {'average_mmr': 6999}, {'average_mmr': float('nan')},
+    {'average_mmr': True}, {'average_mmr': 0}, {'average_mmr': float('nan')},
     {'average_mmr': 30000}, {'observed_at': None},
     {'observed_at': NOW - MAX_AGE - 1}, {'observed_at': NOW + 301},
 ])
@@ -240,3 +240,65 @@ def test_cancel_after_first_stream_is_respected(tmp_path, install_games):
     with pytest.raises(DataError, match='cancelled'):
         run(tmp_path, [candidate(mid) for mid in range(501, 510)], cancel=cancel, on_update=on_update)
     assert updates and updates[0][0]
+
+
+def riki_completed():
+    """Shape of the observed 5,869 MMR Riki carry match, including ten ranks."""
+    game = completed(9017846688)
+    game['players'] = [dict(hero_id=hero, player_slot=slot, rank_tier=80)
+                       for hero, slot in zip(range(1, 11), (*range(5), *range(128, 133)))]
+    game['players'][4].update(
+        hero_id=32, position_est=1, lane_role=1,
+        purchase_log=[{'time': -89, 'key': 'tango'}, {'time': -89, 'key': 'branches'},
+                      {'time': -89, 'key': 'branches'}, {'time': -89, 'key': 'branches'},
+                      {'time': 417, 'key': 'phylactery'}, {'time': 891, 'key': 'diffusal_blade'}],
+        ability_upgrades_arr=[5143, 5145, 5143, 5142, 5143, 5144])
+    return game
+
+
+def run_riki(tmp_path):
+    return opendota_rated_routes(tmp_path, 32, 1, [candidate(9017846688, 5869)],
+                                 lambda _: None, threading.Event(),
+                                 deadline=time.monotonic() + 2)
+
+
+def test_recorded_immortal_riki_match_below_seven_thousand_keeps_actual_average(tmp_path, install_games):
+    calls = install_games({9017846688: riki_completed()})
+    routes, _ = run_riki(tmp_path)
+    assert len(calls) == len(routes) == 1
+    route = routes[0]
+    assert route.hero_id == 32 and route.role == 1 and route.match_ids == [9017846688]
+    assert route.average_mmr == 5869 and route.average_mmr_source == SOURCE
+    assert [purchase.key for purchase in route.purchases].count('branches') == 3
+    assert route.skills[:2] == ['riki_blink_strike', 'riki_tricks_of_the_trade']
+
+
+@pytest.mark.parametrize('problem', ['divine_player', 'missing_rank', 'missing_player',
+                                    'duplicate_slot', 'divine_match_average'])
+def test_low_mmr_game_needs_independent_immortal_evidence(tmp_path, install_games, problem):
+    game = riki_completed()
+    if problem == 'divine_player':
+        game['players'][0]['rank_tier'] = 75
+        game['avg_rank_tier'] = 80
+    elif problem == 'missing_rank':
+        game['players'][0]['rank_tier'] = None
+    elif problem == 'missing_player':
+        game['players'].pop(0)
+    elif problem == 'duplicate_slot':
+        game['players'][0]['player_slot'] = 1
+    elif problem == 'divine_match_average':
+        game['avg_rank_tier'] = 75
+    calls = install_games({9017846688: game})
+    routes, status = run_riki(tmp_path)
+    assert not routes and len(calls) == 1
+    assert 'Immortal' in status
+
+
+def test_source_immortal_average_can_qualify_low_mmr_with_missing_profiles(tmp_path, install_games):
+    game = riki_completed()
+    game['players'][0]['rank_tier'] = None
+    game['avg_rank_tier'] = 80
+    install_games({9017846688: game})
+    routes, _ = run_riki(tmp_path)
+    assert len(routes) == 1 and routes[0].average_mmr == 5869
+    assert routes[0].average_rank == 80

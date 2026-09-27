@@ -138,7 +138,7 @@ def test_summary_rejects_live_missing_and_wrong_role_games_before_detail_fetch(c
 
 @pytest.mark.parametrize('changes', [
     {'match_id': True}, {'match_id': 501.5}, {'match_id': 'not-a-match'},
-    {'average_mmr': None}, {'average_mmr': True}, {'average_mmr': 6999},
+    {'average_mmr': None}, {'average_mmr': True}, {'average_mmr': 0},
     {'average_mmr': float('nan')}, {'average_mmr': 30000},
     {'observed_at': None}, {'observed_at': NOW - MAX_AGE - 1},
     {'observed_at': NOW + 301}, {'observed_at': float('nan')},
@@ -152,11 +152,11 @@ def test_invalid_or_expired_candidates_do_not_trigger_match_queries(client, monk
     assert not routes and not queries.calls
 
 
-def test_exact_seven_thousand_threshold_and_duplicate_ids_fetch_once(client, monkeypatch):
+def test_immortal_match_below_seven_thousand_and_duplicate_ids_fetch_once(client, monkeypatch):
     queries = FakeQueries({501: completed(501)})
     monkeypatch.setattr(client, 'query', queries)
-    routes, _ = run(client, [candidate(501, 7000), candidate(501, 7000)])
-    assert len(routes) == 1 and routes[0].average_mmr == 7000
+    routes, _ = run(client, [candidate(501, 5869), candidate(501, 5869)])
+    assert len(routes) == 1 and routes[0].average_mmr == 5869
     assert [mid for detail, ids, _ in queries.calls if detail for mid in ids] == [501]
 
 

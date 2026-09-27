@@ -165,8 +165,12 @@ class LiveRatings:
         return sum(now - MAX_AGE <= record['observed_at'] <= now + 300
                    for record in records.values())
 
-    def candidates(self, hero_id, minimum_mmr=7000):
-        """Find observed games containing this hero; completion and role need verification."""
+    def candidates(self, hero_id, minimum_mmr=0):
+        """Find observed games; the completed-match source verifies role and rank.
+
+        A fixed MMR cutoff cannot identify Immortal games across regions and
+        seasons. Keep positive observations for independent rank verification.
+        """
         if (_hero_id(hero_id) is None or type(minimum_mmr) not in (int, float)
                 or not 0 <= minimum_mmr < 30000):
             return []

@@ -52,7 +52,7 @@ def test_check_caches_daily_and_manual_can_refresh(updater, monkeypatch):
     assert restored.release == release() and restored.deferred() and not restored.due()
 
 
-@pytest.mark.parametrize('tag', ['v0.1.14', 'v0.1.13'])
+@pytest.mark.parametrize('tag', ['v' + updates.VERSION, 'v0.1.13'])
 def test_never_offers_same_version_or_downgrade(updater, monkeypatch, tag):
     monkeypatch.setattr(updater, '_small', lambda _: json.dumps(payload(release(tag))).encode())
     assert updater.check() is None

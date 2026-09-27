@@ -1,8 +1,9 @@
 """Recent games are compared by professional status and observed match rating."""
 import re
+from dataclasses import replace
 
 from .catalog import PATCHES
-from .ratings import numeric_mmr, match_rank
+from .ratings import numeric_mmr, match_rank, rank_tier
 from .recency import in_recent_window
 
 
@@ -64,8 +65,44 @@ def game_identity(route):
     return ('route', route.id)
 
 
+def _retain_averages(route, observations):
+    """Keep exact-game measurements when replacing build details or providers.
+
+    Selecting a source chooses its purchases and skills, not which separately
+    observed match averages survive. Conflicting measurements are never guessed.
+    """
+    if route.demo or route.tournament or game_identity(route)[0] != 'game':
+        return route
+    donors = [other for other in observations if not other.demo and not other.tournament]
+    accounts = {other.account_id for other in donors
+                if type(other.account_id) is int and other.account_id > 0}
+    if type(route.account_id) is int and route.account_id > 0:
+        donors = [other for other in donors if other.account_id is None or other.account_id == route.account_id]
+    elif len(accounts) > 1:
+        return route
+    updates = {}
+    for field, validate, fallback in (
+        ('average_mmr', numeric_mmr, 'supplied match average MMR'),
+        ('average_rank', lambda value: rank_tier(value, average=True), 'supplied match average rank'),
+    ):
+        if validate(getattr(route, field)) is not None:
+            continue
+        available = [(other, validate(getattr(other, field))) for other in donors]
+        available = [(other, value) for other, value in available if value is not None]
+        if len({value for _, value in available}) != 1:
+            continue
+        donor, value = available[-1]
+        updates[field] = value
+        updates[field + '_source'] = getattr(donor, field + '_source') or f'{donor.source} {fallback}'
+    return replace(route, **updates) if updates else route
+
+
 def ranked(routes, limit=None, *, preferred_id=None):
     """Keep one source per game, preserving an explicitly chosen source and ID."""
+    routes = list(routes)
+    observations = {}
+    for route in routes:
+        observations.setdefault(game_identity(route), []).append(route)
     # Replace old details for the same source ID before resolving provider overlap.
     latest = {route.id: (index, route) for index, route in enumerate(routes)}
     unique = {}
@@ -74,5 +111,6 @@ def ranked(routes, limit=None, *, preferred_id=None):
         priority = (route.id == preferred_id, route_key(route), index)
         if identity not in unique or priority > unique[identity][0]:
             unique[identity] = (priority, route)
-    ordered = sorted((value[1] for value in unique.values()), key=route_key, reverse=True)
+    ordered = sorted((_retain_averages(value[1], observations[identity])
+                      for identity, value in unique.items()), key=route_key, reverse=True)
     return ordered[:limit]

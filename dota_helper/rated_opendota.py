@@ -42,7 +42,7 @@ def opendota_rated_routes(cache_dir, hero, role, candidates, progress, cancel,
             mmr = numeric_mmr(candidate.get('average_mmr'))
         except OverflowError:
             mmr = None
-        if (mid and mmr is not None and mmr >= 7000 and observed is not None
+        if (mid and mmr is not None and mmr > 0 and observed is not None
                 and now - MAX_AGE <= observed <= now + 300):
             mid = int(mid)
             if mid not in records or observed >= records[mid]['observed_at']:
@@ -76,11 +76,26 @@ def opendota_rated_routes(cache_dir, hero, role, candidates, progress, cancel,
             skipped['players unavailable'] += 1
             return
         players = [player for player in players if isinstance(player, dict)]
+        try:
+            average_rank = rank_tier(match.get('avg_rank_tier'), average=True)
+        except OverflowError:
+            average_rank = None
+        if average_rank is not None and average_rank < 80:
+            skipped['conflicting below-Immortal match average'] += 1
+            return
         for player in players:
             profile = _timestamp(player.get('rank_tier'))
             if profile is not None and 0 < profile < 80:
                 skipped['conflicting below-Immortal profile'] += 1
                 return
+        all_immortal = (len(players) == 10
+                        and all(type(player.get('player_slot')) is int for player in players)
+                        and {player.get('player_slot') for player in players} == {*range(5), *range(128, 133)}
+                        and all(type(player.get('rank_tier')) in (int, float)
+                                and player['rank_tier'] == 80 for player in players))
+        if records[mid]['average_mmr'] < 7000 and average_rank != 80 and not all_immortal:
+            skipped['Immortal rank unverified'] += 1
+            return
         matching = [player for player in players
                     if type(player.get('hero_id')) is int and player['hero_id'] == hero]
         if (len(matching) != 1 or type(matching[0].get('position_est')) is not int
@@ -113,10 +128,6 @@ def opendota_rated_routes(cache_dir, hero, role, candidates, progress, cancel,
         if not clean_log or not player['ability_upgrades_arr']:
             skipped['purchase or skill history unavailable'] += 1
             return
-        try:
-            average_rank = rank_tier(match.get('avg_rank_tier'), average=True)
-        except OverflowError:
-            average_rank = None
         match = dict(match, match_id=mid, avg_mmr=records[mid]['average_mmr'],
                      avg_rank_tier=average_rank)
         if type(match.get('patch')) is not int:

@@ -77,10 +77,36 @@ def run(report_path):
                 setup.close()
             finally:
                 game_setup.dota_directories = discover
+            # An isolated verification profile can include real saved lookups.
+            # Check their frozen-table path offline without inventing ratings or
+            # fetching data during the executable smoke test.
+            from .history import decode
+            from .ratings import numeric_mmr
+            saved_mmr = []
+            for entry in list(window.history.entries):
+                expected = {r.match_ids[0]: numeric_mmr(r.average_mmr) for r in decode(entry)
+                            if r.match_ids and numeric_mmr(r.average_mmr) and not r.tournament}
+                if not expected:
+                    continue
+                window.source.setCurrentIndex(entry['source'])
+                window.hero.setCurrentIndex(window.hero.findData(entry['hero']))
+                window.role.setCurrentIndex(window.role.findData(entry['role']))
+                window.show_saved_search(entry)
+                for row, loaded in enumerate(window.routes):
+                    mid = loaded.match_ids[0] if loaded.match_ids else None
+                    if mid not in expected:
+                        continue
+                    assert window.match_table.item(row, 0).text() == f'{expected[mid]:,}'
+                    window.route_choice.setCurrentIndex(row)
+                    window.select_route()
+                    assert window.current_route().match_ids[0] == mid
+                    saved_mmr.append(dict(match_id=mid, average_mmr=expected[mid], selectable=True))
+                window.grab().save(str(report.with_name(f'{report.stem}-mmr-{entry["hero"]}-{entry["role"]}.png')))
             result.update(ok=True, frozen=bool(getattr(sys, "frozen", False)), heroes=len(HEROES),
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
                           invoker_spells=len(invoker.SPELLS), shop_guide_export=True, overlay_fit=True,
                           quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
+                          saved_mmr_routes_checked=saved_mmr,
                           credential_available=bool(load_token()),
                           data_directory=str(LOCAL), window_visible=window.isVisible())
         except Exception as exc:

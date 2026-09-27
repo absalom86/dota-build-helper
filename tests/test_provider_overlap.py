@@ -45,7 +45,11 @@ def test_provider_slot_disagreement_deduplicates_by_exact_game_and_prefers_ranki
     assert opendota.id != stratz.id and opendota.player_slot != stratz.player_slot
     assert game_identity(opendota) == game_identity(stratz)
     assert ranked([opendota, stratz]) == [opendota]
-    assert ranked([opendota, stratz], preferred_id=stratz.id) == [stratz]
+    selected, = ranked([opendota, stratz], preferred_id=stratz.id)
+    assert selected.id == stratz.id and selected.source == stratz.source
+    assert selected.purchases == stratz.purchases and selected.skills == stratz.skills
+    assert selected.average_mmr == 9000
+    assert selected.average_mmr_source == 'OpenDota supplied match average MMR'
     assert opendota.id.startswith('opendota:') and stratz.id.startswith('stratz:')
 
 
@@ -115,7 +119,10 @@ def test_live_provider_overlap_preserves_manual_selection_updates_and_reload(win
     refreshed = replace(selected, title='Refreshed selected source')
     partial(([refreshed], 'Updated purchases'))
     finish(([alternative], 'Lookup complete'))
-    assert view.current_route() is refreshed
+    assert view.current_route().id == refreshed.id
+    assert view.current_route().title == refreshed.title
+    assert view.current_route().purchases == refreshed.purchases
+    assert view.current_route().average_mmr == 10000
     assert view.match_table.rowCount() == view.route_choice.count() == 12
     assert ('power_treads', 1) in view.session.completed
     assert view.session.learned['antimage_mana_break'] == 1

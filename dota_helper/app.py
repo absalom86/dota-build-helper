@@ -173,6 +173,11 @@ class MainWindow(QMainWindow):
         self.live_ratings_busy = False
         self.live_ratings_status = self.live_ratings.status_text()
         self.live_ratings_error = self.live_ratings.last_error
+        self.mmr_lookup_busy = False
+        self.mmr_lookup_pending = False
+        self.mmr_lookup_status = ''
+        self.mmr_lookup_summary = ''
+        self.mmr_lookup_attempt = None
         self.history_key = None
         self.settings = profile.load_settings(self.settings_file)
         self.existing_profile = bool(self.settings)
@@ -677,6 +682,10 @@ class MainWindow(QMainWindow):
                 self.render_routes()
             else:
                 self.update_mmr_status()
+            # The initial feed may arrive after Find builds. Resolve its exact
+            # games too, instead of merely hoping they overlap guide discovery.
+            if self.mmr_lookup_pending:
+                self.lookup_rated_builds()
 
         def failed(_message):
             self.live_ratings_busy = False
@@ -687,6 +696,77 @@ class MainWindow(QMainWindow):
                 self.update_mmr_status()
 
         self.launch_worker(lambda _: self.live_ratings.refresh(), finished, failed)
+
+    def lookup_rated_builds(self):
+        """Resolve captured averages independently of the ordinary build budget."""
+        if self.closing or self.source.currentIndex() not in (0, 4) or self.cancel.is_set():
+            return
+        if self.mmr_lookup_busy:
+            self.mmr_lookup_pending = True
+            return
+        context = (self.hero.currentData(), self.role.currentData(), self.source.currentIndex())
+        candidates = self.live_ratings.candidates(context[0])
+        if not candidates:
+            self.mmr_lookup_pending = self.live_ratings_busy
+            self.mmr_lookup_status = ('Waiting for MMR feed before checking matching builds' if self.live_ratings_busy else
+                                      'No captured MMR games for this hero; available match ranks are shown')
+            self.mmr_lookup_summary = self.mmr_lookup_status
+            self.update_mmr_status()
+            return
+        generation, cancel = self.generation, self.cancel
+        attempt = (generation, tuple((c['match_id'], c['average_mmr']) for c in candidates))
+        if attempt == self.mmr_lookup_attempt:
+            self.mmr_lookup_pending = False
+            return
+        self.mmr_lookup_attempt = attempt
+        self.mmr_lookup_busy = True
+        self.mmr_lookup_pending = False
+        self.mmr_lookup_status = f'Checking {len(candidates)} captured MMR games for this hero / position…'
+        self.update_mmr_status()
+
+        def current():
+            return (not self.closing and generation == self.generation and not cancel.is_set()
+                    and context == (self.hero.currentData(), self.role.currentData(), self.source.currentIndex()))
+
+        def publish(result):
+            if not current():
+                return
+            routes, diagnostic = result
+            self.mmr_lookup_status = diagnostic
+            self.mmr_lookup_summary = f'{len(routes)} verified MMR builds found for this hero / position'
+            self.routes = ranked(self.routes + self.matching_routes(routes),
+                                 preferred_id=self.session.selected if self.session.explicit_choice else None)
+            self.session.accept_routes(self.routes)
+            self.render_routes()
+
+        def finished(result):
+            self.mmr_lookup_busy = False
+            publish(result)
+            if current() and self.routes:
+                self.history.save(*context, self.routes, self.session.selected, self.api_status,
+                                  selected_explicit=self.session.explicit_choice)
+                saved = self.history.find(*context)
+                self.history_key = saved['key'] if saved else None
+                self.refresh_history_list()
+            if self.mmr_lookup_pending and not self.closing:
+                QTimer.singleShot(0, self.lookup_rated_builds)
+
+        def failed(message):
+            self.mmr_lookup_busy = False
+            if current():
+                self.mmr_lookup_status = 'MMR build check: ' + message
+                self.mmr_lookup_summary = 'MMR build check unavailable; existing ratings retained'
+                self.update_mmr_status()
+            if self.mmr_lookup_pending and not self.closing:
+                QTimer.singleShot(0, self.lookup_rated_builds)
+
+        def lookup(progress, update):
+            from .rated_builds import rated_routes
+            from .stratz import Stratz
+            return rated_routes(Stratz(), context[0], context[1], candidates, progress, cancel,
+                                deadline=time.monotonic() + 8, on_update=update)
+
+        self.launch_worker(lookup, finished, failed, partial=publish)
 
     def update_mmr_status(self):
         pubs = [r for r in self.routes if not r.tournament and not r.demo]
@@ -702,8 +782,12 @@ class MainWindow(QMainWindow):
             note = 'Uncaptured games use rank fallback'
         else:
             note = 'Live feed connected'
+        if self.mmr_lookup_busy:
+            text += ' · Checking matching MMR builds…'
+        elif self.mmr_lookup_summary and not rated and self.services_started:
+            note = self.mmr_lookup_summary
         self.mmr_status.setText(text + ' · ' + note)
-        self.mmr_status.setToolTip(self.live_ratings_status + '\n'
+        self.mmr_status.setToolTip(self.live_ratings_status + '\n' + self.mmr_lookup_status + '\n'
             'MMR is available only when supplied with the build or captured for that exact match ID. '
             'A healthy live feed cannot recover arbitrary older games. STRATZ quotas are separate from this OpenDota feed.')
 
@@ -714,6 +798,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "route_choice"):
             return
         self.generation += 1
+        self.mmr_lookup_status = ''
+        self.mmr_lookup_summary = ''
+        self.mmr_lookup_attempt = None
+        self.mmr_lookup_pending = False
         self.history_key = None
         self.pending_auto_fetch = False
         self.cancel.set()
@@ -799,10 +887,13 @@ class MainWindow(QMainWindow):
             self.show_saved_search(entry)
             if (not force and time.time()-entry['updated']<SEARCH_TTL
                     and entry.get('discovery_version')==DISCOVERY_VERSION):
+                self.cancel = threading.Event()
+                self.lookup_rated_builds()
                 return
         self.fetching = True
         self.search_controls(True)
         self.cancel = threading.Event()
+        self.mmr_lookup_attempt = None
         generation = self.generation
         context = (self.hero.currentData(), self.role.currentData(), 0)
         provider = Demo() if self.source.currentIndex() == 1 else OpenDota()
@@ -859,11 +950,9 @@ class MainWindow(QMainWindow):
 
         from .pub_lookup import recent_pubs
         from .stratz import Stratz
-        rated_candidates = self.live_ratings.candidates(context[0])
         def lookup(progress, update):
             if source_index in (0, 4):
                 client = Stratz(refresh=force)
-                client.rated_candidates = rated_candidates
             if source_index == 0:
                 from .recommendations import recommended_routes
                 return recommended_routes(client, context[0], context[1], progress, cancel, update)
@@ -877,6 +966,7 @@ class MainWindow(QMainWindow):
         self.launch_worker(lookup, done, failed,
                            lambda message: self.status.setText(message) if generation == self.generation else None,
                            partial=publish)
+        self.lookup_rated_builds()
 
     def current_route(self):
         return next((r for r in self.routes if r.id == self.session.selected), None)

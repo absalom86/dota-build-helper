@@ -10,7 +10,7 @@ from .endgame import endgame_examples
 from .recency import neutral_patch_label, presentation_warnings
 
 SEARCH_TTL = 1800
-DISCOVERY_VERSION = 11
+DISCOVERY_VERSION = 12
 
 
 def patch_key():

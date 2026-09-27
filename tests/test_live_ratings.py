@@ -337,3 +337,14 @@ def test_expired_candidate_is_excluded_without_network_or_cache_mutation(tmp_pat
                                  source=SOURCE, hero_ids=[155])}
     assert cache.candidates(155) == []
     assert '123' in cache.records
+
+
+def test_positive_mmr_below_seven_thousand_reaches_independent_rank_verification(tmp_path, monkeypatch):
+    response(monkeypatch, [
+        {'match_id': '9017688569', 'average_mmr': 6520, 'players': [{'hero_id': 32}]},
+        {'match_id': '9017846688', 'average_mmr': 5869, 'players': [{'hero_id': 32}]},
+    ])
+    cache = LiveRatings(tmp_path)
+    cache.refresh()
+    assert [row['average_mmr'] for row in cache.candidates(32)] == [6520, 5869]
+    assert cache.candidates(32, minimum_mmr=7000) == []
