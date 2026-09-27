@@ -707,7 +707,7 @@ class MainWindow(QMainWindow):
         context = (self.hero.currentData(), self.role.currentData(), self.source.currentIndex())
         candidates = self.live_ratings.candidates(context[0])
         if not candidates:
-            self.mmr_lookup_pending = self.live_ratings_busy
+            self.mmr_lookup_pending = self.live_ratings_busy or self.services_started
             self.mmr_lookup_status = ('Waiting for MMR feed before checking matching builds' if self.live_ratings_busy else
                                       'No captured MMR games for this hero; available match ranks are shown')
             self.mmr_lookup_summary = self.mmr_lookup_status
@@ -736,6 +736,8 @@ class MainWindow(QMainWindow):
             self.mmr_lookup_summary = f'{len(routes)} verified MMR builds found for this hero / position'
             self.routes = ranked(self.routes + self.matching_routes(routes),
                                  preferred_id=self.session.selected if self.session.explicit_choice else None)
+            if self.routes:
+                self.draft.meta_active = False
             self.session.accept_routes(self.routes)
             self.render_routes()
 

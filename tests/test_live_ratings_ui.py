@@ -287,3 +287,31 @@ def test_first_feed_arrival_resolves_candidates_after_initial_search(window):
     jobs[0][1](SimpleNamespace(status='Feed ready', error=None))
     assert len(jobs) == 2 and window.mmr_lookup_busy and not window.mmr_lookup_pending
     jobs[1][1](([], 'No completed matches'))
+
+
+def test_find_before_startup_feed_still_resolves_first_mmr_readings(window):
+    window.services_started = True
+    jobs = []
+    window.launch_worker = lambda *args, **kwargs: jobs.append(args)
+    window.lookup_rated_builds()  # Find builds before the startup timer fires
+    assert not jobs
+    window.refresh_live_ratings()
+    hero = window.hero.currentData()
+    window.live_ratings.records = {'502': dict(observation(8352), hero_ids=[hero])}
+    jobs[0][1](SimpleNamespace(status='Feed ready', error=None))
+    assert len(jobs) == 2 and window.mmr_lookup_busy
+    jobs[1][1](([], 'No completed matches'))
+
+
+def test_mmr_only_success_replaces_draft_suggestions_with_a_build(window):
+    hero = window.hero.currentData()
+    window.live_ratings.records = {'502': dict(observation(8352), hero_ids=[hero])}
+    window.draft.meta_active = True
+    jobs = []
+    window.launch_worker = lambda *args, **kwargs: jobs.append(args)
+    window.lookup_rated_builds()
+    route = routes()[1]
+    route.average_mmr = 8352
+    jobs[0][1](([route], 'One MMR build ready'))
+    assert not window.draft.meta_active
+    assert window.current_route().id == route.id
