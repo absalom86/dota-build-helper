@@ -45,8 +45,16 @@ DETAILS = (
     'Marked burst: let Raven’s Veil mark reach the target before attacking.\n'
     'Fight / heal: start within Echo Slash range; Grapple after the first slash, '
     'then use Raptor Dance for its area damage and heal.\n'
+    'Rush + Echo (Katana D Q D Q attack): switch to Sai, activate Falcon Rush, '
+    'switch to Katana, aim Echo Slash, then right-click the target. '
+    'Rush persists across the switch and adds secondary attacks to Echo Slash. '
+    'Be in Echo Slash range before casting it; this short sequence has no silence or mark.\n'
+    'Silence engage: switch to Sai for Talon Toss, Katana for Grappling Claw, '
+    'Sai for Falcon Rush, then Katana for Echo Slash; follow with attacks.\n'
     'Scepter combos: after each switch, cast the first spell within 3 seconds. '
-    'This preserves its paired cooldown; casting a weapon spell refreshes Switch Discipline. '
+    'The opening switch is deliberate: it lets Falcon Rush leave Echo Slash ready. '
+    'The protected spell does not trigger its paired cooldown; '
+    'casting a weapon spell refreshes Switch Discipline. '
     'Abilities already on cooldown are not refreshed.\n'
     'These are practice sequences, not live cooldown or target detection. '
     'No inputs are sent to Dota. Mechanics checked 27 September 2026.'
@@ -61,7 +69,7 @@ def reference_html(columns=2):
     for heading, combos in STAGES:
         rows.append(f'<b style="color:#dcaa63">{escape(heading)}</b>')
         for combo in combos:
-            rows.append(f'<b>Start in {escape(combo.stance)}</b>: '
+            rows.append(f'<b>{escape(combo.stance)}</b>: '
                         f'<span style="color:#92cbff">{escape(combo.keys)}</span>')
     rows.append('<span style="color:#97a6b7">Requires learned, ready skills. '
                 'Parry / mark = wait for success.<br>'

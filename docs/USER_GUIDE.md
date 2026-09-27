@@ -20,7 +20,7 @@ The compact spell reference uses five rows with two spells per row, with each re
 
 ### Kez combo reference
 
-Selecting Kez shows a compact card beside the build, with all three stages available. Every combo begins with **Start in Sai** or **Start in Katana**, describing the form before the first key; an opening D switches out of that form. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
+Selecting Kez shows a compact card beside the build, with all three stages available. The **Sai:** or **Katana:** label identifies your starting form, before the first key; an opening D switches out of that form. It also works before a lookup finishes. It hides during draft recommendations and when you change heroes. Use **Preview / reposition** to inspect it without a live match; hover the card for full ability names and execution notes.
 
 These use **default QWER keys**, with **D = Switch Discipline** and **attack = right-click**. Begin in the stated stance with every required ability learned and ready. Custom bindings, current stance, cooldowns and Scepter ownership are not detected by this reference; the final two combos require Aghanim's **Scepter**, not Shard.
 
@@ -35,9 +35,19 @@ These use **default QWER keys**, with **D = Switch Discipline** and **attack = r
 
 For the parry, face the attacker and wait for a successful block. For Q → W, begin within Echo Slash range and Grapple after the first slash; Raptor Dance supplies area damage and healing. Without Scepter, corresponding ability slots share cooldowns. With Scepter, cast the first spell within three seconds after each switch to preserve the paired ability's cooldown; weapon spells refresh D. Abilities already cooling down are not refreshed. Katana E is a baseline active ability; Shard upgrades it and the parry.
 
+**What does Katana D → Q → D → Q → attack do?** Start in Katana with Scepter and the abilities ready:
+
+1. **D:** switch to Sai and open Scepter's protected-cast window.
+2. **Q:** activate Falcon Rush. The protected cast leaves Echo Slash ready and refreshes D.
+3. **D:** switch back to Katana; Falcon Rush stays active.
+4. **Q:** aim Echo Slash through the target. Rush adds secondary attacks to the slashes.
+5. **Attack:** right-click to follow up while Rush remains active.
+
+This is a short damage combo. The opening D is necessary for the Scepter protection; simply starting in Sai and pressing Q can put Echo Slash on cooldown. Position within Echo Slash range before the second Q. The short sequence provides neither a silence nor a mark. The longer **silence engage** starts with Talon Toss and Grappling Claw to silence and approach the target, then uses the same Rush/Echo combination. These spell sequences still require aiming and appropriate targets; they are not a promise that every hit will connect.
+
 The card abbreviates the Katana/Sai pairs as **Echo/Rush**, **Claw/Toss**, **Impale/Parry** and **Dance/Veil**. Full names are Echo Slash/Falcon Rush, Grappling Claw/Talon Toss, Kazurai Katana/Shodo Sai and Raptor Dance/Raven's Veil.
 
-These are curated practice sequences, not measured popularity rankings or automatic inputs. Mechanics were checked against [Valve's Kez data](https://www.dota2.com/hero/kez) on 27 September 2026; combo references are [Chili's carry guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3460471608) and [Brain Damage's Falconer's Cookbook](https://steamcommunity.com/sharedfiles/filedetails/?id=3513065509). Guide advice can age between patches; follow the current in-game ability descriptions.
+These are curated practice sequences, not measured popularity rankings or automatic inputs. Mechanics were checked against [Valve's Kez data](https://www.dota2.com/hero/kez) on 27 September 2026; combo references are [Chili's carry guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3460471608), [A Book of Five Wings' mid guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3433837612) and [Brain Damage's Falconer's Cookbook](https://steamcommunity.com/sharedfiles/filedetails/?id=3513065509). Guide advice can age between patches; follow the current in-game ability descriptions.
 
 ### Use a selected build in Dota's shop
 
