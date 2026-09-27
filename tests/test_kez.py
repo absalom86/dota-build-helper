@@ -92,6 +92,32 @@ def test_hero_reference_follows_selection_without_fetch_and_hides_during_draft(
         window.close()
 
 
+@pytest.mark.parametrize('hero_id', [kez.HERO_ID, invoker.HERO_ID])
+def test_manual_hero_choice_replaces_draft_before_lookup_finishes(
+        tmp_path, monkeypatch, hero_id):
+    monkeypatch.setattr('dota_helper.app.LOCAL', tmp_path)
+    monkeypatch.setattr('dota_helper.app.dota_active', lambda: False)
+    window = MainWindow(start_services=False)
+    try:
+        window.timer.stop()
+        window.capture_timer.stop()
+        window.draft.meta_active = True
+        window.draft.overlay_enabled.setChecked(True)
+        requests = []
+        monkeypatch.setattr(window, 'request_selection_builds', lambda: requests.append(hero_id))
+        index = window.hero.findData(hero_id)
+        window.hero.setCurrentIndex(index)
+        window.hero.activated.emit(index)  # The real dropdown selection signal.
+        window.tick()
+        assert requests == [hero_id] and not window.routes
+        assert window.hero_manual and not window.draft.meta_active
+        assert not window.draft.overlay_enabled.isChecked()
+        reference = window.overlay.kez_combos if hero_id == kez.HERO_ID else window.overlay.invoker_spells
+        assert not reference.isHidden() and reference.text()
+    finally:
+        window.close()
+
+
 def crowded_kez_overlay(font_size):
     overlay = Overlay({'overlay_layout_version': 3, 'overlay_w': 270,
                        'overlay_h': 600, 'overlay_x': 1060, 'overlay_y': 160,

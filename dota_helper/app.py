@@ -1780,6 +1780,8 @@ class MainWindow(QMainWindow):
     def override_hero(self, *_):
         self.hero_manual=True
         self.draft_preview_hero=None
+        self.draft.meta_active=False
+        self.draft.overlay_enabled.setChecked(False)
         self.request_selection_builds()
 
     def request_selection_builds(self):
