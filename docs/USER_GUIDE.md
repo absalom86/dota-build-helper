@@ -56,6 +56,16 @@ The card abbreviates the Katana/Sai pairs as **Echo/Rush**, **Claw/Toss**, **Imp
 
 These are curated practice sequences, not measured popularity rankings or automatic inputs. Mechanics were checked against [Valve's Kez data](https://www.dota2.com/hero/kez) on 27 September 2026; combo references are [Chili's carry guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3460471608), [A Book of Five Wings' mid guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3433837612) and [Brain Damage's Falconer's Cookbook](https://steamcommunity.com/sharedfiles/filedetails/?id=3513065509). Guide advice can age between patches; follow the current in-game ability descriptions.
 
+### Shadow Shaman lane and combo reference
+
+Selecting Shadow Shaman shows lane, Blink control and healing tips immediately, even before a build loads. Game detection uses the same selection path. The card hides during draft recommendations and for other heroes. Enable **Preview / reposition** to read the full execution notes by hovering the card.
+
+- **Lane:** use **Q · Ether Shock** to secure a ranged creep your core cannot safely last-hit, ideally hitting an enemy hero too. Let your core take the last hit when possible. This tip does not override the selected build's skill order or require Q at level 1.
+- **Blink control:** **Blink → W · Hex → R · Mass Serpent Ward → E · Shackles**. Blink close enough for both disables, place wards within attack range of the target, then let Shackles channel. Moving or casting another spell interrupts your channel. Check mana and spell readiness first; enemy allies can still interrupt you.
+- **Low health:** Shackles heals you while channeling, including on enemy or neutral creeps. Choose a healthy creep that can survive the channel, away from enemy interruptions and dangerous camp attacks. Avoid taking your core's last hits and preserve mana for a save or kill. Use Tango or an available Stick/Wand **before** the channel. If you have a spare Iron Branch, plant it and eat its tree with Tango for double regeneration duration; this consumes the branch. Use a Healing Salve from safety when appropriate.
+
+These are static tips with **default QWER bindings**; Blink uses your item-slot key. The card does not detect low health, spell readiness or custom bindings and sends no inputs to Dota. Mechanics checked on 29 September 2026 against [Valve's Shadow Shaman data](https://www.dota2.com/datafeed/herodata?language=english&hero_id=27), the [DotaCoach support guide](https://steamcommunity.com/sharedfiles/filedetails/?id=2699962568), and the [Tango description](https://dotacoach.gg/en/items/tango). Follow current in-game descriptions after patches.
+
 ### Use a selected build in Dota's shop
 
 1. Select a game/build, review its starting-quantity preview, then click **Export to Dota shop…** below it.

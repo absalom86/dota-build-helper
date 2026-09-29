@@ -5,7 +5,7 @@ import time
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QSizeGrip, QScrollBar, QWidget
 
-from . import invoker, kez
+from . import invoker, kez, shadow_shaman
 from .catalog import clock_text, item_name
 from .recency import neutral_patch_label
 from .ratings import rating_text
@@ -64,6 +64,7 @@ class Overlay(QWidget):
         self.locked = False
         self.invoker_active = False
         self.kez_active = False
+        self.shadow_shaman_active = False
         self.fit_ok = True
         self.fit_message = ''
         self.item_lines = None
@@ -103,15 +104,19 @@ class Overlay(QWidget):
         self.kez_combos.setTextFormat(Qt.TextFormat.RichText)
         self.kez_combos.setToolTip(kez.DETAILS + '\n\nKatana / Sai:\n' + '\n'.join(
             f'{key}: {katana} / {sai}' for key, katana, sai in kez.KEYS))
+        self.shadow_shaman_tips = label()
+        self.shadow_shaman_tips.setTextFormat(Qt.TextFormat.RichText)
+        self.shadow_shaman_tips.setToolTip(shadow_shaman.DETAILS)
+        self.references = [self.invoker_spells, self.kez_combos, self.shadow_shaman_tips]
         self.note = label('', True)
         self.lane_timers = label('', True)
         self.labels = [self.title, self.hero, self.route_label, self.clock, self.initial_buy,
                        self.components, self.supplies, self.items, self.skill, self.talents,
-                       self.invoker_spells, self.kez_combos, self.note, self.lane_timers]
+                       *self.references, self.note, self.lane_timers]
         for widget in self.labels:
             widget.setMinimumWidth(0)
         for widget in (self.initial_buy, self.components, self.supplies, self.talents,
-                       self.invoker_spells, self.kez_combos):
+                       *self.references):
             widget.hide()
         self.title.hide()
         self.grip = QSizeGrip(self)
@@ -129,16 +134,26 @@ class Overlay(QWidget):
         self.invoker_spells.setVisible(enabled)
         if enabled:
             self.show_kez(False)
+            self.show_shadow_shaman(False)
 
     def show_kez(self, enabled):
         self.kez_active = enabled
         self.kez_combos.setVisible(enabled)
         if enabled:
             self.show_invoker(False)
+            self.show_shadow_shaman(False)
+
+    def show_shadow_shaman(self, enabled):
+        self.shadow_shaman_active = enabled
+        self.shadow_shaman_tips.setVisible(enabled)
+        if enabled:
+            self.show_invoker(False)
+            self.show_kez(False)
 
     def _reference_text(self, split):
         self.invoker_spells.setText(invoker.reference_html(columns=1 if split else 2))
         self.kez_combos.setText(kez.reference_html(columns=1 if split else 2))
+        self.shadow_shaman_tips.setText(shadow_shaman.reference_html())
 
     def set_item_lines(self, lines):
         """Rows are (plain text, completed); markup never comes from a provider."""
@@ -169,8 +184,8 @@ class Overlay(QWidget):
             widget.setStyleSheet(f'font-size:{max(11,size-1)}px; color:#b6d8d2; background:#192932; padding:4px;')
         self.skill.setStyleSheet(f'font-size:{size+1}px; font-weight:600; color:#f0dcff; '
                                 'background:#2a2638; padding:5px; border-left:3px solid #bda0df;')
-        self.invoker_spells.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
-        self.kez_combos.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
+        for widget in self.references:
+            widget.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
         for widget in self.labels:
             widget.ensurePolished()
 
@@ -202,10 +217,10 @@ class Overlay(QWidget):
             column = (inner-2*gap)//3
             right = inner-2*gap-2*column
             middle = [self.initial_buy, self.components, self.supplies]
-            references = [self.invoker_spells, self.kez_combos]
-            # Kez has several combo sections. Give that reference its own column
+            references = list(self.references)
+            # Longer hero references need their own column;
             # and use the spare space below early purchases for talent picks.
-            if self.kez_active:
+            if self.kez_active or self.shadow_shaman_active:
                 middle.append(self.talents)
             else:
                 references.insert(0, self.talents)
@@ -217,11 +232,11 @@ class Overlay(QWidget):
             left = (inner-gap)//2
             right = inner-gap-left
             y = max(stack([self.components, self.supplies, self.items], margin, y, left),
-                    stack([self.initial_buy, self.skill, self.talents, self.invoker_spells, self.kez_combos],
+                    stack([self.initial_buy, self.skill, self.talents, *self.references],
                           margin+left+gap, y, right))
         else:
             y = stack([self.skill, self.components, self.supplies, self.items, self.talents,
-                       self.invoker_spells, self.kez_combos], margin, y, inner)
+                       *self.references], margin, y, inner)
         y = stack([self.note, self.lane_timers], margin, y, inner)
         return placements, y + margin + (0 if self.locked else 12)
 
@@ -241,16 +256,16 @@ class Overlay(QWidget):
         max_width = min(bounds.width()-16, 600)
         preferred = min(self.preferred_width, max_width)
         key = (preferred, self.font_size, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
-               y, self.locked, self.invoker_active, self.kez_active,
+               y, self.locked, self.invoker_active, self.kez_active, self.shadow_shaman_active,
                tuple((widget.text(), widget.isHidden()) for widget in self.labels
-                     if widget not in (self.invoker_spells, self.kez_combos)))
+                     if widget not in self.references))
         if key == self._fit_key:
             return
         # Draft suggestions live in one label. Narrowing that label into a build
         # column merely adds wrapping while leaving the other columns empty.
         auxiliary = any(not w.isHidden() and w.text() for w in
                         (self.initial_buy, self.components, self.supplies, self.talents,
-                         self.invoker_spells, self.kez_combos))
+                         *self.references))
         widths = list(range(preferred, max_width+1, 30))
         if max_width not in widths:
             widths.append(max_width)

@@ -13,7 +13,7 @@ def run(report_path):
     from .detection import capture
     from .draft import rank_picks
     from .providers import LOCAL
-    from . import guides, invoker, kez, starting_items
+    from . import guides, invoker, kez, shadow_shaman, starting_items
     from .credentials import load_token
     import mss
 
@@ -67,6 +67,14 @@ def run(report_path):
             assert all(combo.keys in window.overlay.kez_combos.text()
                        for _, combos in kez.STAGES for combo in combos)
             window.overlay.grab().save(str(report.with_name(f'{report.stem}-kez.png')))
+            window.hero.setCurrentIndex(window.hero.findData(shadow_shaman.HERO_ID))
+            window.tick()
+            window.overlay.fit_content(QRect(0, 0, 1280, 720))
+            assert window.overlay.fit_ok and not window.overlay.shadow_shaman_tips.isHidden()
+            assert window.overlay.invoker_spells.isHidden() and window.overlay.kez_combos.isHidden()
+            assert 'Blink → W → R → E' in window.overlay.shadow_shaman_tips.text()
+            assert 'Shackles' in window.overlay.shadow_shaman_tips.text()
+            window.overlay.grab().save(str(report.with_name(f'{report.stem}-shadow-shaman.png')))
             from .setup_ui import SetupDialog
             from . import game_setup
             # Only a disposable fixture is written; never configure or launch the real game.
@@ -113,6 +121,7 @@ def run(report_path):
             result.update(ok=True, frozen=bool(getattr(sys, "frozen", False)), heroes=len(HEROES),
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
                           invoker_spells=len(invoker.SPELLS), kez_combos=sum(len(c) for _, c in kez.STAGES),
+                          shadow_shaman_reference=True,
                           shop_guide_export=True, overlay_fit=True,
                           quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
                           saved_mmr_routes_checked=saved_mmr,

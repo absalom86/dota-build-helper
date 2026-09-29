@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QFont, QFontDatabase, QTextDocument
 
-from dota_helper import invoker, kez
+from dota_helper import invoker, kez, shadow_shaman
 from dota_helper.app import MainWindow, STYLE
 from dota_helper.overlay import Overlay
 
@@ -92,7 +92,7 @@ def test_hero_reference_follows_selection_without_fetch_and_hides_during_draft(
         window.close()
 
 
-@pytest.mark.parametrize('hero_id', [kez.HERO_ID, invoker.HERO_ID])
+@pytest.mark.parametrize('hero_id', [kez.HERO_ID, invoker.HERO_ID, shadow_shaman.HERO_ID])
 def test_manual_hero_choice_replaces_draft_before_lookup_finishes(
         tmp_path, monkeypatch, hero_id):
     monkeypatch.setattr('dota_helper.app.LOCAL', tmp_path)
@@ -112,7 +112,9 @@ def test_manual_hero_choice_replaces_draft_before_lookup_finishes(
         assert requests == [hero_id] and not window.routes
         assert window.hero_manual and not window.draft.meta_active
         assert not window.draft.overlay_enabled.isChecked()
-        reference = window.overlay.kez_combos if hero_id == kez.HERO_ID else window.overlay.invoker_spells
+        reference = {kez.HERO_ID: window.overlay.kez_combos,
+                     invoker.HERO_ID: window.overlay.invoker_spells,
+                     shadow_shaman.HERO_ID: window.overlay.shadow_shaman_tips}[hero_id]
         assert not reference.isHidden() and reference.text()
     finally:
         window.close()
@@ -159,8 +161,12 @@ def crowded_kez_overlay(font_size):
                                   QRect(0, 0, 1280, 720), QRect(0, 0, 1024, 576)],
                          ids=['1440p', '768p', '720p', 'scaled-desktop'])
 @pytest.mark.parametrize('font_size', [13, 16])
-def test_full_build_and_all_combo_stages_remain_visible(qt_application, bounds, font_size):
+@pytest.mark.parametrize('hero_id', [kez.HERO_ID, shadow_shaman.HERO_ID])
+def test_full_build_and_all_combo_stages_remain_visible(qt_application, bounds, font_size, hero_id):
     overlay = crowded_kez_overlay(font_size)
+    if hero_id == shadow_shaman.HERO_ID:
+        overlay.hero.setText('Shadow Shaman · Soft support')
+        overlay.show_shadow_shaman(True)
     try:
         overlay.show()
         qt_application.processEvents()
@@ -173,7 +179,9 @@ def test_full_build_and_all_combo_stages_remain_visible(qt_application, bounds, 
         assert overlay.overflow_bar.isHidden()
         assert len(overlay.item_lines) == 15
         assert overlay.font_size == font_size
-        assert 'AGHANIM' in overlay.kez_combos.text().upper()
+        reference = overlay.kez_combos if hero_id == kez.HERO_ID else overlay.shadow_shaman_tips
+        assert not reference.isHidden()
+        assert all(w.isHidden() for w in overlay.references if w is not reference)
         labels = [label for label in overlay.labels if not label.isHidden() and label.text()]
         for label in labels:
             assert overlay.rect().contains(label.geometry()), label.text()
