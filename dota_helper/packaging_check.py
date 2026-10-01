@@ -81,6 +81,17 @@ def run(report_path):
             assert json.loads(window.settings_file.read_text())['hero_references'] is False
             window.hero_references.setChecked(True)
             assert not window.overlay.shadow_shaman_tips.isHidden()
+            # Role suggestions must also work when manually returning from a build,
+            # without enemy picks or a completed matchup request.
+            window.draft.meta_active = False
+            window.draft.meta_rows = [dict(hero_id=1, games=200, wins=110, rate=.55)]
+            window.draft.meta_status = 'DELAYED DATA · Offline test fixture'
+            window.draft.overlay_enabled.setChecked(True)
+            window.tick()
+            assert 'TOP WIN RATE' in window.overlay.items.text()
+            assert 'Anti-Mage' in window.overlay.items.text()
+            assert 'DELAYED DATA' in window.overlay.note.text()
+            window.draft.overlay_enabled.setChecked(False)
             from .setup_ui import SetupDialog
             from . import game_setup
             # Only a disposable fixture is written; never configure or launch the real game.
@@ -129,6 +140,7 @@ def run(report_path):
                           invoker_spells=len(invoker.SPELLS), kez_combos=sum(len(c) for _, c in kez.STAGES),
                           shadow_shaman_reference=True,
                           hero_reference_toggle=True,
+                          draft_role_overlay=True,
                           shop_guide_export=True, overlay_fit=True,
                           quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
                           saved_mmr_routes_checked=saved_mmr,

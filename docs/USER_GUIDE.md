@@ -104,6 +104,8 @@ Six-slot finishes are optional ideas for what to build towards. They never promo
 
 ## Draft helper
 
+Role rankings load automatically, even without enemy picks. **Refresh role rankings** retries the statistics request. The card shows the actual UTC date range of the source's latest seven calendar days. If STRATZ's data is more than three days behind, rankings remain available with a **DELAYED DATA** label and their age; they are not presented as current-patch statistics. Data over 30 days old is rejected. An API error retains already loaded rows with their date and a refresh-failure message. Choose **Show suggestions in overlay** to display these role rankings when there are no matchup results, including after viewing a build. Turning off extra hero spell/combo references does not disable draft suggestions.
+
 Open **Draft helper**, enter up to five confirmed enemy picks, and choose **Any hero**, **Carry**, or **Support**. Suggestions update after edits; turn off automatic updates to use **Suggest picks** manually. Use **Exclude hero** for allied picks and bans. Enemy picks and excluded heroes cannot be recommended. Duplicate/conflicting selections are rejected.
 
 The table ranks up to ten heroes and shows each one's strongest and weakest observed matchup. Select a row for individual win counts, sample sizes and source links. **Use selected hero in Builds** opens that hero's build search; it does not pick a hero in Dota. **Show suggestions in overlay** displays up to eight picks. Confirmed local-player game state switches the overlay back to build guidance. **Clear draft** resets enemy picks and exclusions; **New match** resets the draft too.
