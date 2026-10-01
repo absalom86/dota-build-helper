@@ -34,7 +34,7 @@ def readable_font(qt_application):
 
 
 def crowded_overlay(milestones=15):
-    overlay = Overlay({'overlay_layout_version': 3, 'overlay_w': 270,
+    overlay = Overlay({'overlay_compact_pages': False, 'overlay_layout_version': 3, 'overlay_w': 270,
                        'overlay_h': 600, 'overlay_x': 1060, 'overlay_y': 160}, STYLE)
     overlay.set_locked(True)
     overlay.hero.setText('Invoker · Mid')

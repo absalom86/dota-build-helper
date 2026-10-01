@@ -40,6 +40,20 @@ def test_recent_pro_examples_precede_pubs_across_patch_versions():
     assert endgame_examples([old, unknown, current], 1, 1) == [unknown]
 
 
+def test_three_distinct_targets_keep_best_sources_and_survive_history(tmp_path):
+    routes = [complete(str(index)) for index in range(5)]
+    for index, route in enumerate(routes):
+        route.average_mmr = 11000 - index * 1000
+        route.final_items[-1] = ['travel_boots', 'power_treads', 'abyssal_blade', 'butterfly', 'travel_boots'][index]
+    routes[-1].pro_player = True
+    expected = [routes[-1].id, routes[1].id, routes[2].id]
+    assert [r.id for r in endgame_examples(routes, 1, 1)] == expected
+    history = SearchHistory(tmp_path)
+    history.save(1, 1, 0, routes, routes[0].id, 'Ready')
+    restored = SearchHistory(tmp_path).find(1, 1, 0)
+    assert [r.id for r in decode_examples(restored)] == expected
+
+
 def test_history_keeps_optional_finish_after_top_ten_and_across_refresh(tmp_path):
     history = SearchHistory(tmp_path)
     routes = []

@@ -121,7 +121,7 @@ def test_manual_hero_choice_replaces_draft_before_lookup_finishes(
 
 
 def crowded_kez_overlay(font_size):
-    overlay = Overlay({'overlay_layout_version': 3, 'overlay_w': 270,
+    overlay = Overlay({'overlay_compact_pages': False, 'overlay_layout_version': 3, 'overlay_w': 270,
                        'overlay_h': 600, 'overlay_x': 1060, 'overlay_y': 160,
                        'overlay_font': font_size}, STYLE)
     overlay.set_locked(True)

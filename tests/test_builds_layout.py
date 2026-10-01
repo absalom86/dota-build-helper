@@ -118,7 +118,9 @@ def test_separate_endgame_tab_leaves_build_and_purchase_space_intact(builds_wind
     assert 'Butterfly' in text and 'Power Treads' in text
     assert 'Different game' in text and str(route.match_ids[0]) in window.endgame_choice.currentText()
     assert window.final_build.horizontalScrollBar().maximum() == 0
-    assert window.final_build.verticalScrollBar().maximum() == 0
+    # Source details and the available-count notice now share the scrollable comparison.
+    window.final_build.verticalScrollBar().setValue(window.final_build.verticalScrollBar().maximum())
+    assert '1 of 3 distinct targets available' in text
     assert window.tabs.widget(0).horizontalScrollBar().maximum() == 0
     assert window.purchases.viewport().height() >= window.purchases.rowHeight(0) * 2
     window.match_table.setCurrentCell(row, 0)
@@ -148,3 +150,37 @@ def test_switching_endgame_example_does_not_change_build_progress_or_skills(buil
     assert window.current_endgame().id == second.id
     assert str(second.match_ids[0]) in window.endgame_choice.currentText()
     assert '8,000 MMR' in window.endgame_choice.currentText()
+
+
+def test_three_endgame_targets_visible_together_and_scroll_on_small_window(builds_window, qt_application):
+    window = builds_window
+    for index, route in enumerate(window.routes[-3:]):
+        route.final_items = ['butterfly', 'basher', 'manta', 'bfury', 'skadi',
+                             ['power_treads', 'travel_boots', 'abyssal_blade'][index]]
+    window.render_routes()
+    selected = window.current_route()
+    window.build_detail_tabs.setCurrentWidget(window.endgame_page)
+    window.resize(900, 700)
+    qt_application.processEvents()
+    assert len(window.endgame_routes) == 3
+    text = window.final_build.toPlainText()
+    for number, route in enumerate(window.endgame_routes, 1):
+        assert f'Option {number}' in text
+        assert str(route.match_ids[0]) in text
+    assert all(item in text for item in ('Power Treads', 'Boots of Travel', 'Abyssal Blade'))
+    assert window.final_build.horizontalScrollBar().maximum() == 0
+    bar = window.final_build.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(bar.maximum())
+    window.endgame_choice.setCurrentIndex(2)
+    assert 'Option 3 · shop target' in window.final_build.toPlainText()
+    assert 'Option 1' in window.final_build.toPlainText()
+    assert window.current_route() is selected
+
+
+def test_endgame_shows_honest_shortfall(builds_window):
+    window = builds_window
+    window.routes[-1].final_items = ['butterfly', 'basher', 'manta', 'bfury', 'skadi', 'power_treads']
+    window.render_routes()
+    assert '1 of 3 distinct targets available' in window.final_build.toPlainText()
+    assert 'Option 2' not in window.final_build.toPlainText()

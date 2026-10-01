@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.25"
+  #define AppVersion "0.1.34"
 #endif
 #ifndef AppExecutable
   #define AppExecutable "..\dist\DotaBuildHelper.exe"

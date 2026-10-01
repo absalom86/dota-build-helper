@@ -108,3 +108,19 @@ class SearchHistory:
                 entry.update(selected=selected,selected_explicit=True,used=time.time())
                 self.write()
                 return
+
+    def save_recovered_skills(self, route, original_skills):
+        """Persist exact-player enrichment without altering selection or search age."""
+        changed = False
+        for entry in self.entries:
+            for field in ('routes', 'endgame_routes'):
+                for record in entry.get(field, []):
+                    if (record.get('id') == route.id and record.get('hero_id') == route.hero_id
+                            and record.get('account_id') == route.account_id
+                            and record.get('player_slot') == route.player_slot
+                            and tuple(record.get('skills', [])) == tuple(original_skills)):
+                        record['skills'] = list(route.skills)
+                        record['warnings'] = list(route.warnings)
+                        changed = True
+        if changed:
+            self.write()

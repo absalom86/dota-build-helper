@@ -180,6 +180,22 @@ def test_extreme_content_is_bounded_and_scrollable_in_preview(qt_application):
         overlay.fit_content(bounds)
         assert overlay.overflow_bar.value() == 0
         assert overlay.content.pos() == QPoint(0, 0)
+        overlay.set_scroll_shortcuts_available(True)
+        assert 'Ctrl+Alt' in overlay.overflow_hint.text()
+        overlay.scroll_page(1)
+        offset = overlay.overflow_bar.value()
+        assert offset > 0 and overlay.content.y() == -offset
+        # Live ticks change content and refit: retain the user's reading position.
+        overlay.clock.setText('00:01')
+        overlay.fit_content(bounds)
+        assert overlay.overflow_bar.value() == offset
+        for _ in range(100):
+            overlay.scroll_page(1)
+        assert overlay.overflow_bar.value() == overlay.overflow_bar.maximum()
+        overlay.scroll_page(-1)
+        assert overlay.overflow_bar.value() < overlay.overflow_bar.maximum()
+        overlay.scroll_page(0)
+        assert overlay.content.pos() == QPoint(0, 0)
         # Returning to normal data must also reset clipping and scroll offset.
         overlay.set_item_lines(rows[:3])
         overlay.fit_content(QRect(0, 0, 2560, 1440))

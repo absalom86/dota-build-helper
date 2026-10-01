@@ -31,6 +31,7 @@ from .ranking import ranked
 from .ratings import rating_text, numeric_mmr, average_mmr_text, average_mmr_help, average_rank_text, average_rank_help
 from .live_ratings import LiveRatings
 from .skill_display import overlay_skill_text, skill_order_html
+from .ability_icons import AbilityIcons
 from .endgame import six_slot_items, six_slot_text, endgame_examples
 from .builds import overlay_sections, starting_buy_text
 from . import starting_items
@@ -40,7 +41,9 @@ from .overlay_content import near_term_purchases
 from .lane_timers import LaneTimers
 from .providers import LOCAL, OpenDota, Demo
 from . import profile
+from .version import VERSION
 from .windows import dota_active, register_hotkey, unregister_hotkey, IS_WINDOWS
+from .windows import register_scroll_hotkeys, unregister_scroll_hotkeys
 
 
 STYLE = """
@@ -112,15 +115,27 @@ class Bridge(QObject):
 
 
 class HotkeyFilter(QAbstractNativeEventFilter):
-    def __init__(self, callback):
+    def __init__(self, callback, scroll_callback=None, page_callback=None, reference_scroll_callback=None):
         super().__init__()
         self.callback = callback
+        self.scroll_callback = scroll_callback
+        self.page_callback = page_callback
+        self.reference_scroll_callback = reference_scroll_callback
 
     def nativeEventFilter(self, event_type, message):
         if IS_WINDOWS:
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == 0x0312 and msg.wParam == 1:
                 self.callback()
+                return True, 0
+            if msg.message == 0x0312 and msg.wParam in (2, 3, 4) and self.scroll_callback:
+                self.scroll_callback({2: -1, 3: 1, 4: 0}[msg.wParam])
+                return True, 0
+            if msg.message == 0x0312 and msg.wParam == 5 and self.page_callback:
+                self.page_callback()
+                return True, 0
+            if msg.message == 0x0312 and msg.wParam in (6, 7, 8) and self.reference_scroll_callback:
+                self.reference_scroll_callback({6: -1, 7: 1, 8: 0}[msg.wParam])
                 return True, 0
         return False, 0
 
@@ -190,6 +205,9 @@ class MainWindow(QMainWindow):
         self.quantity_cancel = threading.Event()
         self.quantity_results = {}
         self.quantity_attempted = set()
+        self.skill_recovery_busy = False
+        self.skill_recovery_attempted = set()
+        self.skill_recovery_cancel = threading.Event()
         self.closing = False
         self.workers = set()
         self.fetching = False
@@ -223,8 +241,16 @@ class MainWindow(QMainWindow):
         self.detector = Detector(LOCAL / "portraits")
         self.gsi_status = "Waiting for local game state"
         self.api_status = "Choose a hero and find builds, or explore the offline demo."
-        self.overlay = Overlay(self.settings, STYLE)
-        self.setWindowTitle("Dota Build Helper")
+        self.overlay = Overlay(self.settings, STYLE, detached_references=True)
+        self.ability_icons = AbilityIcons(LOCAL / 'ability-icons', self, online=start_services and not demo)
+        self.overlay.skill.set_icon_cache(self.ability_icons)
+        self.hero_overlay = Overlay(dict(
+            overlay_layout_version=3, overlay_compact_pages=True,
+            overlay_x=self.settings.get('hero_overlay_x', self.overlay.x()-282),
+            overlay_y=self.settings.get('hero_overlay_y', self.overlay.preferred_y),
+            overlay_w=self.settings.get('hero_overlay_w', 270),
+            overlay_font=self.overlay.font_size), STYLE, reference_only=True)
+        self.setWindowTitle(f"Dota Build Helper v{VERSION}")
         self.setWindowIcon(QIcon(str(Path(__file__).parent / 'data' / 'app-icon.ico')))
         self.resize(1180, 880)
         self.setMinimumSize(880, 640)
@@ -279,8 +305,10 @@ class MainWindow(QMainWindow):
                 self.gsi_status = "Listening on 127.0.0.1:38765 · waiting for Dota"
             except OSError:
                 self.gsi_status = "Port 38765 unavailable. Another copy may be running."
-        self.hotkey_filter = HotkeyFilter(lambda: self.overlay_enabled.setChecked(not self.overlay_enabled.isChecked()))
+        self.hotkey_filter = HotkeyFilter(lambda: self.overlay_enabled.setChecked(not self.overlay_enabled.isChecked()),
+                                          self.scroll_overlay, self.toggle_hero_overlay, self.scroll_hero_overlay)
         self.hotkey_ok = register_hotkey(self.settings.get("hotkey", 0x77)) if start_services else False
+        self.change_scroll_hotkeys()
         QApplication.instance().installNativeEventFilter(self.hotkey_filter)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -565,9 +593,19 @@ class MainWindow(QMainWindow):
                                        'Turning this off keeps item builds, skills, talents and lane timers.')
         self.hero_references.toggled.connect(self.change_hero_references)
         form.addRow(self.hero_references)
-        form.addRow(button("Position below top-right game stats", self.overlay.place_top_right))
+        self.compact_overlay = QCheckBox('Compact build panel height (recommended)')
+        self.compact_overlay.setChecked(self.overlay.compact)
+        self.compact_overlay.toggled.connect(self.change_compact_overlay)
+        form.addRow(self.compact_overlay)
+        form.addRow(button("Position both panels below top-right game stats", self.position_overlay_panels))
         form.addRow("Opacity", self.opacity)
         form.addRow("Toggle shortcut", self.hotkey)
+        self.scroll_hotkeys = QCheckBox('Enable overlay shortcuts · Ctrl + Alt')
+        self.scroll_hotkeys.setChecked(self.settings.get('overlay_scroll_hotkeys', True))
+        self.scroll_hotkeys.toggled.connect(self.change_scroll_hotkeys)
+        form.addRow(self.scroll_hotkeys)
+        self.scroll_hotkey_status = label('', 'muted')
+        form.addRow(self.scroll_hotkey_status)
         self.overlay_width = QSpinBox()
         self.overlay_width.setRange(270, 600)
         self.overlay_width.setSingleStep(30)
@@ -588,7 +626,7 @@ class MainWindow(QMainWindow):
         form.addRow('Laning supplies until', self.supply_minutes)
         self.overlay_fit_status = label('', 'muted')
         form.addRow(self.overlay_fit_status)
-        form.addRow(label("Preview lets you drag or change width. The overlay fits your screen using columns and, when needed, smaller text. Your preferred width and text size are kept. Unusually long content can be scrolled in Preview. During play the overlay is click-through.\nBorderless fullscreen is the target mode; exclusive fullscreen needs live verification.", "muted"))
+        form.addRow(label("Builds and hero tips have separate panels. In Preview, drag or resize each independently; both positions are saved. Ctrl + Alt + F9 shows/hides hero tips. Ctrl + Alt + Page Up / Down scrolls the build; add Shift to scroll hero tips. Home returns that panel to the top. Both stay click-through during play.\nBorderless fullscreen is the target mode; exclusive fullscreen needs live verification.", "muted"))
         layout.addWidget(overlay_group)
         role_group=QGroupBox('Draft role recognition · experimental')
         role_form=QFormLayout(role_group)
@@ -803,6 +841,8 @@ class MainWindow(QMainWindow):
         self.auto_fetch_attempted = False
         self.quantity_cancel.set()
         self.quantity_attempted.clear()
+        self.skill_recovery_cancel.set()
+        self.skill_recovery_attempted.clear()
         if not hasattr(self, "route_choice"):
             return
         self.generation += 1
@@ -1133,6 +1173,9 @@ class MainWindow(QMainWindow):
         self.refresh_guide_status()
 
     def schedule_quantity_check(self):
+        self.schedule_skill_recovery()
+        if self.skill_recovery_busy:
+            return
         route = self.current_route()
         if (not self.services_started or self.closing or self.fetching or self.quantity_busy or route is None
                 or route.demo or route.source != 'STRATZ' or starting_items.correction(route) is not None
@@ -1145,6 +1188,38 @@ class MainWindow(QMainWindow):
                     and not self.fetching and starting_items.key(current) not in self.quantity_attempted):
                 self.verify_starting_quantities(False)
         QTimer.singleShot(600, check)
+
+    def schedule_skill_recovery(self):
+        from .skill_evidence import needs_recovery, recover_skills, RECOVERY_NOTE
+        route = self.current_route()
+        if (not self.services_started or self.closing or self.fetching or self.skill_recovery_busy
+                or route is None or not needs_recovery(route)):
+            return
+        identity = (route.id, route.account_id, route.player_slot, tuple(route.skills))
+        if identity in self.skill_recovery_attempted:
+            return
+        self.skill_recovery_attempted.add(identity)
+        self.skill_recovery_busy = True
+        generation = self.generation
+        self.skill_recovery_cancel = threading.Event()
+        cancel = self.skill_recovery_cancel
+        def finish(skills):
+            self.skill_recovery_busy = False
+            current = self.current_route()
+            if (not self.closing and skills and generation == self.generation and current is not None
+                    and (current.id, current.account_id, current.player_slot, tuple(current.skills)) == identity):
+                current.skills = skills
+                if RECOVERY_NOTE not in current.warnings:
+                    current.warnings.append(RECOVERY_NOTE)
+                try:
+                    self.history.save_recovered_skills(current, identity[3])
+                except OSError:
+                    self.status.setText('Talents recovered; saved history could not be updated. Match data remains cached.')
+                self.render_route()
+                self.tick()
+            if not self.closing:
+                self.schedule_quantity_check()
+        self.launch_worker(lambda _: recover_skills(route, OpenDota(), cancel), finish, lambda _: finish(None))
 
     def verify_starting_quantities(self, interactive=True):
         from .quantity_evidence import verify_selected
@@ -1227,9 +1302,9 @@ class MainWindow(QMainWindow):
         self.endgame_routes = endgame_examples(pool + self.routes, hero, role) if self.source.currentIndex() != 1 else []
         self.endgame_choice.blockSignals(True)
         self.endgame_choice.clear()
-        for example in self.endgame_routes:
+        for number, example in enumerate(self.endgame_routes, 1):
             source = f'PRO · {example.player}' if example.tournament or example.pro_player else rating_text(example)
-            self.endgame_choice.addItem(f'{source} · Match {example.match_ids[0] if example.match_ids else example.id}', example.id)
+            self.endgame_choice.addItem(f'Shop target {number} · {source} · Match {example.match_ids[0] if example.match_ids else example.id}', example.id)
         self.endgame_choice.setCurrentIndex(max(0, self.endgame_choice.findData(previous)))
         self.endgame_choice.setEnabled(bool(self.endgame_routes))
         self.endgame_choice.blockSignals(False)
@@ -1295,23 +1370,33 @@ class MainWindow(QMainWindow):
                                          'Follow any available build. Six completed slots are optional and never affect game ranking.')
         else:
             selected = self.current_route()
-            same_game = selected is not None and selected.id == example.id
-            origin = 'Same game as the selected build' if same_game else 'Different game · selected build unchanged'
-            match = example.match_ids[0] if example.match_ids else example.id
-            identity = route_identity(example)
-            items = six_slot_items(example)
-            rows = ''.join('<tr><td width="50%">' + escape(item_name(items[i])) +
-                           '</td><td width="50%">' + escape(item_name(items[i+1])) + '</td></tr>'
-                           for i in range(0, 6, 2))
-            heading = 'Same game · optional target' if same_game else 'Different game · optional target'
-            patch = identity.split('\n')[-1]
-            self.final_build.setHtml(f'<b>{heading}</b><table width="100%" cellspacing="1" cellpadding="0">{rows}</table>'
-                                     f'<span style="font-size:11px">{escape(patch)}</span>')
-            details = (f'{identity}\nMatch {match} · {example.source}\n{origin}\n'
-                       'Recorded final inventory, not purchase order or six extra items. '
-                       'Choose items for your game; this is one possible finish.')
-            self.final_build.setToolTip(details)
-            self.endgame_choice.setToolTip(details)
+            blocks = []
+            details = []
+            for number, candidate in enumerate(self.endgame_routes, 1):
+                same_game = selected is not None and selected.id == candidate.id
+                origin = 'Same game' if same_game else 'Different game'
+                match = candidate.match_ids[0] if candidate.match_ids else candidate.id
+                identity = route_identity(candidate)
+                items = six_slot_items(candidate)
+                rows = ''.join('<tr><td width="50%">' + escape(item_name(items[i])) +
+                               '</td><td width="50%">' + escape(item_name(items[i+1])) + '</td></tr>'
+                               for i in range(0, 6, 2))
+                chosen = ' · shop target' if candidate.id == example.id else ''
+                blocks.append(f'<b>Option {number}{chosen}</b><br>'
+                              f'<span style="font-size:11px">{escape(identity).replace(chr(10), " · ")}<br>'
+                              f'{origin} · Match {escape(str(match))}</span>'
+                              f'<table width="100%" cellspacing="1" cellpadding="0">{rows}</table>')
+                credit = (f'Option {number}: {identity}\nMatch {match} · {candidate.source}\n{origin}\n'
+                          'Recorded final inventory, not purchase order or six extra items.')
+                details.append(credit)
+                if candidate.id == example.id:
+                    self.endgame_choice.setToolTip('Choose the optional target included in your shop-guide export.\n'
+                                                  'Your followed build and skills stay unchanged.\n\n' + credit)
+            if len(self.endgame_routes) < 3:
+                blocks.append(f'<span style="font-size:11px">{len(self.endgame_routes)} of 3 distinct targets '
+                              'available in loaded or saved games for this hero and position.</span>')
+            self.final_build.setHtml('<hr>'.join(blocks))
+            self.final_build.setToolTip('\n\n'.join(details))
         self.refresh_guide_status()
 
     def render_route(self):
@@ -1571,14 +1656,11 @@ class MainWindow(QMainWindow):
                 self.overlay.set_item_lines(lines)
             else:
                 self.overlay.set_message('No recorded item milestones')
-            self.overlay.skill.setText(overlay_skill_text(self.session, route))
+            self.overlay.skill.set_route(self.session, route)
             self.overlay.skill.setToolTip('Observed upgrade order; check availability in game. Exact hero levels are not supplied.')
             self.update_skill_display(route)
-            talents=list(dict.fromkeys(s for s in route.skills if s.startswith('special_bonus_') and s!='special_bonus_attributes'))
-            talent_lines=[("Done · " if self.session.learned[s] else "")+ability_name(s) for s in talents]
-            self.overlay.talents.setText("Talent picks · recorded order\n"+"\n".join(talent_lines)
-                                         if talents else "Talent picks not recorded")
-            self.overlay.talents.show()
+            self.overlay.talents.clear()
+            self.overlay.talents.hide()
             notes = []
             if not route.demo:
                 if self.session.hero_at is not None:
@@ -1617,9 +1699,20 @@ class MainWindow(QMainWindow):
                                  f"API: {self.api_status}\nMetadata snapshot: bundled OpenDota constants; patch {patch_name(PATCHES[-1]['id'])}")
         draft_text = self.draft.overlay_text()
         show_reference = self.hero_references.isChecked() and not draft_text
-        self.overlay.show_invoker(self.hero.currentData() == invoker.HERO_ID and show_reference)
-        self.overlay.show_kez(self.hero.currentData() == kez.HERO_ID and show_reference)
-        self.overlay.show_shadow_shaman(self.hero.currentData() == shadow_shaman.HERO_ID and show_reference)
+        for panel in (self.overlay, self.hero_overlay):
+            panel.show_invoker(self.hero.currentData() == invoker.HERO_ID and show_reference)
+            panel.show_kez(self.hero.currentData() == kez.HERO_ID and show_reference)
+            panel.show_shadow_shaman(self.hero.currentData() == shadow_shaman.HERO_ID and show_reference)
+        hero_heading = self.hero.currentText() + ' · Hero tips'
+        if self.hero_overlay.hero.text() != hero_heading:
+            self.hero_overlay.overflow_bar.setValue(0)
+        self.hero_overlay.hero.setText(hero_heading)
+        self.hero_overlay.font_size = self.overlay.font_size
+        self.hero_overlay.set_locked(active or not self.preview.isChecked())
+        self.hero_overlay.setWindowOpacity(self.opacity.value() / 100)
+        self.hero_overlay.fit_content()
+        self.hero_overlay.setVisible(visible and any((self.hero_overlay.invoker_active,
+                                    self.hero_overlay.kez_active, self.hero_overlay.shadow_shaman_active)))
         self.export_guide_button.setEnabled(route is not None)
         timer_text=self.lane_timers.text(second,clock_status,self.role.currentData(),
                                         HEROES.get(str(self.hero.currentData()),{}),bool(draft_text))
@@ -1649,6 +1742,46 @@ class MainWindow(QMainWindow):
     def change_hotkey(self):
         unregister_hotkey()
         self.hotkey_ok = register_hotkey(self.hotkey.currentData())
+
+    def change_scroll_hotkeys(self, _enabled=None):
+        if self.services_started:
+            unregister_scroll_hotkeys()
+        enabled = self.scroll_hotkeys.isChecked()
+        self.scroll_hotkeys_ok = bool(enabled and self.services_started and register_scroll_hotkeys())
+        self.overlay.set_scroll_shortcuts_available(self.scroll_hotkeys_ok)
+        self.hero_overlay.set_scroll_shortcuts_available(self.scroll_hotkeys_ok)
+        self.scroll_hotkey_status.setText(
+            'Ctrl + Alt: F9 toggles hero tips; Page Up / Down scroll; Home returns to top. Add Shift for hero-panel scrolling.' if self.scroll_hotkeys_ok else
+            'Scroll shortcuts unavailable / already in use. Preview scrolling still works.' if enabled and self.services_started else
+            'Scroll shortcuts disabled.' if not enabled else 'Scroll shortcuts inactive in offline checks.')
+        self.settings['overlay_scroll_hotkeys'] = enabled
+        profile.save_settings(self.settings_file, self.settings)
+
+    def scroll_overlay(self, direction):
+        if self.scroll_hotkeys.isChecked() and self.overlay.isVisible():
+            self.overlay.scroll_page(direction)
+
+    def toggle_hero_overlay(self):
+        if self.scroll_hotkeys.isChecked() and self.overlay.isVisible():
+            self.hero_references.setChecked(not self.hero_references.isChecked())
+
+    def scroll_hero_overlay(self, direction):
+        if self.scroll_hotkeys.isChecked() and self.hero_overlay.isVisible():
+            self.hero_overlay.scroll_page(direction)
+
+    def position_overlay_panels(self):
+        self.overlay.place_top_right()
+        self.hero_overlay.move(self.overlay.x()-self.hero_overlay.preferred_width-12, self.overlay.y())
+        self.hero_overlay.preferred_y = self.overlay.y()
+        self.hero_overlay._fitted_y = None
+        self.hero_overlay.fit_content()
+        self.save_settings()
+
+    def change_compact_overlay(self, enabled):
+        self.overlay.set_compact(enabled)
+        self.settings['overlay_compact_pages'] = enabled
+        profile.save_settings(self.settings_file, self.settings)
+        self.tick()
 
     def export_gsi(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export game-state configuration", "gamestate_integration_build_helper.cfg", "Dota configuration (*.cfg)")
@@ -1905,10 +2038,14 @@ class MainWindow(QMainWindow):
                                  overlay_w=self.overlay.preferred_width, overlay_h=self.overlay.height(),
                                  overlay_font=self.overlay.font_size, supply_minutes=self.supply_minutes.value(),
                                  hero_references=self.hero_references.isChecked())
+            self.settings.update(hero_overlay_x=self.hero_overlay.x(),
+                                 hero_overlay_y=self.hero_overlay.preferred_y,
+                                 hero_overlay_w=self.hero_overlay.preferred_width)
         profile.save_settings(self.settings_file, self.settings)
 
     def closeEvent(self, event):
         self.closing = True
+        self.skill_recovery_cancel.set()
         self.updates.updater.cancel.set()
         self.draft.stop()
         self.cancel.set()
@@ -1927,9 +2064,13 @@ class MainWindow(QMainWindow):
         self.save_settings()
         unregister_hotkey()
         QApplication.instance().removeNativeEventFilter(self.hotkey_filter)
+        if self.services_started:
+            unregister_scroll_hotkeys()
         if self.receiver:
             self.receiver.stop()
         self.overlay.close()
+        self.hero_overlay.close()
+        self.ability_icons.close()
         event.accept()
 
 

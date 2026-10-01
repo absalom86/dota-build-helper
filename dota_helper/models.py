@@ -49,6 +49,11 @@ class Route:
     average_rank_source: str = ''
     average_mmr_source: str = ''
 
+    def __post_init__(self):
+        # Older saved imports may contain IDs unknown to their bundled catalogue.
+        from .catalog import ABILITY_IDS
+        self.skills = [ABILITY_IDS.get(str(key), str(key)) for key in self.skills]
+
 
 @dataclass
 class Session:

@@ -3,12 +3,13 @@ from html import escape
 import time
 
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QSizeGrip, QScrollBar, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QSizeGrip, QScrollBar, QWidget
 
 from . import invoker, kez, shadow_shaman
 from .catalog import clock_text, item_name
 from .recency import neutral_patch_label
 from .ratings import rating_text
+from .skill_strip import SkillStrip
 
 
 def route_identity(route, now=None):
@@ -42,12 +43,20 @@ def purchase_summary(purchases):
 
 
 class Overlay(QWidget):
-    def __init__(self, settings, stylesheet=''):
+    def __init__(self, settings, stylesheet='', *, detached_references=False, reference_only=False):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
                             Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setStyleSheet(stylesheet)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName('buildOverlay')
+        self.setStyleSheet(stylesheet + '\nQWidget#buildOverlay { background:#111820; border:1px solid #394956; }')
+        self.compact = settings.get('overlay_compact_pages', True)
+        self.detached_references = detached_references
+        self.reference_only = reference_only
+        if reference_only:
+            self.compact = True
+        self.reference_page = False
         screen = QApplication.screenAt(QPoint(settings.get('overlay_x', 18), settings.get('overlay_y', 18))) or QApplication.primaryScreen()
         bounds = screen.availableGeometry()
         if settings.get('overlay_layout_version') != 3:
@@ -67,13 +76,18 @@ class Overlay(QWidget):
         self.shadow_shaman_active = False
         self.fit_ok = True
         self.fit_message = ''
+        self.scroll_shortcuts_available = False
         self.item_lines = None
         self._fit_key = None
         self.effective_font_size = self.font_size
         self.viewport = QWidget(self)
         self.content = QWidget(self.viewport)
         self.overflow_bar = QScrollBar(Qt.Orientation.Vertical, self)
-        self.overflow_bar.valueChanged.connect(lambda value: self.content.move(0, -value))
+        self.overflow_bar.setStyleSheet('QScrollBar:vertical { background:#182630; width:12px; margin:0; } '
+                                       'QScrollBar::handle:vertical { background:#607786; min-height:24px; } '
+                                       'QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; } '
+                                       'QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:none; }')
+        self.overflow_bar.valueChanged.connect(self._scroll_content)
         self.overflow_bar.hide()
         self.overflow_hint = QLabel('More below · scroll in Preview', self)
         self.overflow_hint.setStyleSheet('font-size:11px; color:#ffe0a3; background:#263239; padding:3px;')
@@ -96,7 +110,8 @@ class Overlay(QWidget):
         self.components = label()
         self.supplies = label()
         self.items = label('Choose a hero and find a build route.')
-        self.skill = label()
+        self.skill = SkillStrip(self.content)
+        self.skill.setWordWrap(True)
         self.talents = label()
         self.invoker_spells = label()
         self.invoker_spells.setTextFormat(Qt.TextFormat.RichText)
@@ -120,6 +135,148 @@ class Overlay(QWidget):
             widget.hide()
         self.title.hide()
         self.grip = QSizeGrip(self)
+        self.header = QWidget(self)
+        self.reference_content = QWidget(self.viewport)
+        self.build_tab = QPushButton('Build', self)
+        self.reference_tab = QPushButton('Hero keys', self)
+        for tab in (self.build_tab, self.reference_tab):
+            tab.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            tab.setCheckable(True)
+            tab.setStyleSheet('QPushButton { padding:3px; background:#1c2732; border:0; font-size:12px; } '
+                             'QPushButton:checked { color:#ffe0a3; border-bottom:2px solid #d4a15c; }')
+            tab.setToolTip('Ctrl + Alt + F9 switches pages during play. Click here in Preview.')
+        self.build_tab.clicked.connect(lambda: self.set_reference_page(False))
+        self.reference_tab.clicked.connect(lambda: self.set_reference_page(True))
+        self.set_compact(self.compact)
+        if self.reference_only:
+            for widget in self.labels:
+                if widget is not self.hero and widget not in self.references:
+                    widget.hide()
+        self._fitting = False
+
+    def _scroll_content(self, value):
+        target = self.reference_content if self.reference_only or (self.compact and self.reference_page) else self.content
+        target.move(0, -value)
+
+    def set_compact(self, enabled):
+        self.compact = enabled or self.reference_only
+        enabled = self.compact
+        self.reference_page = False
+        self._fit_key = None
+        for widget in self.labels:
+            hidden = widget.isHidden()
+            parent = (self.header if widget in (self.title, self.hero, self.route_label, self.clock) else
+                      self.reference_content if widget in self.references else
+                      self if widget is self.lane_timers else self.content) if enabled else self.content
+            if self.detached_references and widget in self.references:
+                parent = self.reference_content
+            widget.setParent(parent)
+            widget.setVisible(not hidden)
+        self.header.setVisible(enabled)
+        self.reference_content.hide()
+        self.content.show()
+        self.build_tab.hide()
+        self.reference_tab.hide()
+        self.overflow_bar.setValue(0)
+
+    def set_reference_page(self, enabled):
+        enabled = bool(enabled and not self.detached_references and self.compact and any(
+            (self.invoker_active, self.kez_active, self.shadow_shaman_active)))
+        if self.reference_page != enabled:
+            self.reference_page = enabled
+            self.overflow_bar.setValue(0)
+            self._fit_key = None
+        self.fit_content()
+
+    def toggle_page(self):
+        self.set_reference_page(not self.reference_page)
+
+    def _fit_compact(self, bounds):
+        """Keep font/width stable; scroll the body, with header and timers pinned."""
+        self._style_labels()
+        self._reference_text(True)
+        has_reference = (not self.detached_references and not self.reference_only and
+                         any((self.invoker_active, self.kez_active, self.shadow_shaman_active)))
+        if self.reference_page and not has_reference:
+            self.reference_page = False
+            self.overflow_bar.setValue(0)
+        if self._fitted_y is None or self.y() != self._fitted_y:
+            self.preferred_y = self.y()
+        width = min(self.preferred_width, bounds.width()-16)
+        cap = min(560, int(bounds.height() * .62))
+        y = max(bounds.top()+8, min(self.preferred_y, bounds.bottom()-cap-8))
+
+        def stack(widgets, usable_width, top=8):
+            placements = []
+            for widget in widgets:
+                if not widget.isHidden() and widget.text():
+                    height = self._height(widget, usable_width-16)
+                    placements.append((widget, QRect(8, top, usable_width-16, height)))
+                    top += height + 5
+            return placements, top + 3
+
+        header_rects, header_h = stack([self.hero] if self.reference_only else
+                                      [self.title, self.hero, self.route_label, self.clock], width)
+        body = self.references if self.reference_only or self.reference_page else [self.initial_buy, self.skill,
+                self.components, self.supplies, self.items, self.talents, self.note]
+        lane_h = (self._height(self.lane_timers, width-16)+8
+                  if not self.reference_only and not self.lane_timers.isHidden() and self.lane_timers.text() else 0)
+        footer_h = lane_h + (28 if has_reference else 0) + 32
+        body_rects, content_h = stack(body, width)
+        height = min(cap, header_h + content_h + footer_h)
+        viewport_h = max(40, height-header_h-footer_h)
+        overflow = content_h > viewport_h
+        if overflow:
+            body_rects, content_h = stack(body, width-16)
+        self._fitting = True
+        right = min(bounds.right()-8, max(bounds.left()+width+8, self.x()+self.width()))
+        self.resize(width, height)
+        self.move(right-width, y)
+        self._fitted_y = y
+        self.header.setGeometry(0, 0, width, header_h)
+        self.viewport.setGeometry(0, header_h, width-16 if overflow else width, viewport_h)
+        show_reference = self.reference_only or self.reference_page
+        active = self.reference_content if show_reference else self.content
+        self.content.setVisible(not show_reference)
+        self.reference_content.setVisible(show_reference)
+        active.resize(self.viewport.width(), content_h)
+        placed = {widget for widget, _ in header_rects + body_rects}
+        for widget in self.labels:
+            if widget.parentWidget() in (self.header, active) and widget not in placed:
+                # Empty QLabels still paint their stylesheet background. Keep
+                # unplaced labels from covering content with stale rectangles.
+                widget.setGeometry(0, 0, 0, 0)
+        for widget, rect in header_rects + body_rects:
+            widget.setGeometry(rect)
+        self.overflow_bar.setGeometry(width-16, header_h, 16, viewport_h)
+        self.overflow_bar.setVisible(overflow)
+        self.overflow_bar.setRange(0, max(0, content_h-viewport_h))
+        self.overflow_bar.setPageStep(viewport_h)
+        self._scroll_content(self.overflow_bar.value())
+        footer_y = header_h + viewport_h
+        if lane_h:
+            self.lane_timers.setGeometry(8, footer_y+4, width-16, lane_h-8)
+        footer_y += lane_h
+        for index, tab in enumerate((self.build_tab, self.reference_tab)):
+            tab.setVisible(has_reference)
+            tab.setGeometry(8+index*((width-16)//2), footer_y, (width-16)//2, 26)
+        self.build_tab.setChecked(not self.reference_page)
+        self.reference_tab.setChecked(self.reference_page)
+        hint = (('Ctrl+Alt+F9: switch page' if self.scroll_shortcuts_available else
+                 'Preview: click Build / Hero keys') if has_reference else '')
+        if overflow:
+            shortcut = 'Ctrl+Alt+Shift+PgUp/PgDn' if self.reference_only else 'Ctrl+Alt+PgUp/PgDn'
+            hint += ('\n' if hint else '') + (shortcut + ': scroll' if self.scroll_shortcuts_available else 'Scroll in Preview')
+        elif not hint:
+            hint = 'Ctrl+Alt+F9: hide hero tips' if self.reference_only and self.scroll_shortcuts_available else (
+                'Hero tips' if self.reference_only else 'Build · all items visible')
+        self.overflow_hint.setText(hint)
+        self.overflow_hint.setGeometry(0, height-32, width, 32)
+        self.overflow_hint.show()
+        self.grip.setGeometry(width-16, height-14, 12, 12)
+        self.fit_ok = not overflow
+        page = 'Hero tips' if self.reference_only else 'Hero keys' if self.reference_page else 'Build'
+        self.fit_message = f'{width} × {height}px · {page} · ' + ('scroll for more' if overflow else 'all page content visible')
         self._fitting = False
 
     def place_top_right(self):
@@ -183,7 +340,7 @@ class Overlay(QWidget):
         for widget in (self.components, self.supplies):
             widget.setStyleSheet(f'font-size:{max(11,size-1)}px; color:#b6d8d2; background:#192932; padding:4px;')
         self.skill.setStyleSheet(f'font-size:{size+1}px; font-weight:600; color:#f0dcff; '
-                                'background:#2a2638; padding:5px; border-left:3px solid #bda0df;')
+                                'background:#182630;')
         for widget in self.references:
             widget.setStyleSheet(f'font-size:{max(11,size-1)}px; background:#182630; padding:4px;')
         for widget in self.labels:
@@ -198,7 +355,8 @@ class Overlay(QWidget):
         """Return explicit rectangles, so Qt cannot allocate stretch gaps or clip labels."""
         margin, gap = 8, 4
         inner = width - margin*2
-        visible = lambda widget: not widget.isHidden() and bool(widget.text())
+        visible = lambda widget: (not widget.isHidden() and bool(widget.text()) and
+                                  not (self.detached_references and widget in self.references))
         placements = []
 
         def stack(widgets, x, y, column_width):
@@ -254,10 +412,13 @@ class Overlay(QWidget):
 
         Keep the preferred font when possible. Reclaim a low saved position,
         then temporarily compact text before moving above the usual HUD margin.
-        Exceptionally large data uses an explicit Preview scrollbar, never a
+        Exceptionally large data uses a scrollbar and optional global shortcuts, never a
         window extending below the monitor.
         """
         bounds = bounds or self.screen().availableGeometry()
+        if self.compact:
+            self._fit_compact(bounds)
+            return
         if self._fitted_y is None or self.y() != self._fitted_y:
             self.preferred_y = self.y()
         y = max(bounds.top()+8, min(self.preferred_y, bounds.bottom()-180))
@@ -319,7 +480,7 @@ class Overlay(QWidget):
             placements, content_height = self._arrange(width-18, split)
         compact = f' · auto-fit {size}px (preferred {self.font_size}px)' if size != self.font_size else ''
         self.fit_message = (f'{width} × {height}px · all sections visible{compact}' if self.fit_ok else
-                            f'{width} × {height}px · scroll in Preview for remaining content{compact}')
+                            f'{width} × {height}px · scroll with shortcuts or in Preview{compact}')
         right = min(bounds.right()-8, max(bounds.left()+width+8, self.x()+self.width()))
         self._fitting = True
         self.resize(width, height)
@@ -335,6 +496,10 @@ class Overlay(QWidget):
         self.overflow_bar.setRange(0, max(0, content_height-viewport_height) if not self.fit_ok else 0)
         self.overflow_bar.setPageStep(viewport_height)
         self.content.move(0, -self.overflow_bar.value())
+        placed = {widget for widget, _ in placements}
+        for widget in self.labels:
+            if widget not in placed:
+                widget.setGeometry(0, 0, 0, 0)
         for widget, rect in placements:
             widget.setGeometry(rect)
         self.grip.setGeometry(width-20, height-16, 12, 12)
@@ -347,6 +512,19 @@ class Overlay(QWidget):
             event.accept()
         else:
             super().wheelEvent(event)
+
+    def scroll_page(self, direction):
+        """Move without taking focus, including while the overlay is click-through."""
+        bar = self.overflow_bar
+        if direction == 0:
+            bar.setValue(0)
+        else:
+            bar.setValue(bar.value() + direction * max(1, bar.pageStep() - 40))
+
+    def set_scroll_shortcuts_available(self, available):
+        self.scroll_shortcuts_available = available
+        self.overflow_hint.setText('Ctrl+Alt: PgUp / PgDn / Home' if available else
+                                   'More below · scroll in Preview')
 
     def set_locked(self, locked):
         if self.locked == locked:
