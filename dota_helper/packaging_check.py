@@ -75,6 +75,12 @@ def run(report_path):
             assert 'Blink → W → R → E' in window.overlay.shadow_shaman_tips.text()
             assert 'Shackles' in window.overlay.shadow_shaman_tips.text()
             window.overlay.grab().save(str(report.with_name(f'{report.stem}-shadow-shaman.png')))
+            window.hero_references.setChecked(False)
+            assert all(label.isHidden() for label in window.overlay.references)
+            assert not window.overlay.items.isHidden() and not window.overlay.skill.isHidden()
+            assert json.loads(window.settings_file.read_text())['hero_references'] is False
+            window.hero_references.setChecked(True)
+            assert not window.overlay.shadow_shaman_tips.isHidden()
             from .setup_ui import SetupDialog
             from . import game_setup
             # Only a disposable fixture is written; never configure or launch the real game.
@@ -122,6 +128,7 @@ def run(report_path):
                           demo_routes=3, route_switch=True, draft_ranking=True, capture_module=True,
                           invoker_spells=len(invoker.SPELLS), kez_combos=sum(len(c) for _, c in kez.STAGES),
                           shadow_shaman_reference=True,
+                          hero_reference_toggle=True,
                           shop_guide_export=True, overlay_fit=True,
                           quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
                           saved_mmr_routes_checked=saved_mmr,

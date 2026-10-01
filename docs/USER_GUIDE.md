@@ -12,6 +12,12 @@ The full major-item build, next skill and recorded talent picks are kept. The hi
 
 Borderless fullscreen is the target mode. Exclusive fullscreen capture/overlay visibility is **not verified**. Test your configuration before relying on it. The app does not inject into Dota or change display settings.
 
+### Hide extra hero information
+
+Under **Overlay & connection**, turn off **Show hero spell / combo references** to hide the extra Invoker, Kez and Shadow Shaman cards. The overlay resizes immediately; your item build, starting purchases, next skill, talents and lane timers remain available. This preference applies to all heroes and is saved across restarts and updates. Turn it back on to restore the appropriate card.
+
+The overlay compares column arrangements at the same width, including a separate column for a long hero reference. This reduces unnecessary height on 1080p screens. Fitting uses the available screen area, including Windows scaling and the taskbar, while preserving your preferred font and width for when there is more room.
+
 ### Invoker spell reference
 
 Selecting Invoker manually or receiving his confirmed hero from game state shows all ten spell recipes automatically, even before a build lookup finishes. The reference uses the **default keys**: Q = Quas, W = Wex, E = Exort; enter the three orbs, press R to Invoke, then use the spell's displayed D/F slot and target as required. Custom/legacy bindings are not detected. The table lists orb recipes, not current spell availability or cooldowns.

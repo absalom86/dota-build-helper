@@ -9,6 +9,7 @@ from PySide6.QtCore import QPoint
 
 from dota_helper import invoker
 from test_overlay_layout import assert_visible_geometry, crowded_overlay
+from test_kez import crowded_kez_overlay
 
 
 @pytest.fixture(autouse=True)
@@ -185,5 +186,48 @@ def test_extreme_content_is_bounded_and_scrollable_in_preview(qt_application):
         assert overlay.fit_ok
         assert overlay.overflow_bar.isHidden() and overlay.overflow_hint.isHidden()
         assert overlay.content.pos() == QPoint(0, 0)
+    finally:
+        overlay.close()
+
+
+@pytest.mark.parametrize('hero', ['invoker', 'kez', 'shaman'])
+@pytest.mark.parametrize('show_reference', [True, False])
+@pytest.mark.parametrize('bounds,font', [
+    (QRect(0, 0, 1920, 1040), 13),
+    (QRect(0, 0, 1536, 824), 16),
+    (QRect(0, 0, 1280, 680), 16),
+    (QRect(0, 0, 1024, 536), 13),
+], ids=['1080p-taskbar', '1080p-125-percent', '1080p-150-percent', 'small-scaled'])
+def test_hero_cards_and_full_build_fit_scaled_work_area(qt_application, hero, show_reference, bounds, font):
+    overlay = crowded_overlay() if hero == 'invoker' else crowded_kez_overlay(font)
+    try:
+        overlay.font_size = font
+        if hero == 'shaman':
+            overlay.show_shadow_shaman(True)
+        if not show_reference:
+            overlay.show_invoker(False)
+            overlay.show_kez(False)
+            overlay.show_shadow_shaman(False)
+        overlay.move(bounds.right()-overlay.width()-12, 160)
+        overlay.fit_content(bounds)
+        assert_visible_geometry(overlay, bounds)
+        assert len(overlay.item_lines) == 15
+        assert not overlay.initial_buy.isHidden() and not overlay.talents.isHidden()
+        assert overlay.font_size == font and overlay.preferred_width == 270
+        assert sum(not label.isHidden() for label in overlay.references) == int(show_reference)
+        if bounds.height() >= 680:
+            assert overlay.y() == 160
+    finally:
+        overlay.close()
+
+
+def test_shorter_reference_column_is_selected_at_same_width(qt_application):
+    overlay = crowded_kez_overlay(13)
+    try:
+        overlay.fit_content(QRect(0, 0, 1920, 1040))
+        _, old_height = overlay._arrange(overlay.width(), True)
+        _, separate_height = overlay._arrange(overlay.width(), 2)
+        assert separate_height < old_height
+        assert overlay.height() == separate_height
     finally:
         overlay.close()

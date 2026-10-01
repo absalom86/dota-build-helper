@@ -212,6 +212,8 @@ class Overlay(QWidget):
         top = [self.title, self.hero, self.route_label, self.clock]
         if not split:
             top.append(self.initial_buy)
+        elif split == 2:
+            top.extend([self.initial_buy, self.components, self.supplies])
         y = stack(top, margin, margin, inner)
         if split == 3:
             column = (inner-2*gap)//3
@@ -228,6 +230,13 @@ class Overlay(QWidget):
                     stack(middle, margin+column+gap, y, column),
                     stack(references,
                           margin+2*(column+gap), y, right))
+        elif split == 2:
+            # Keep the optional reference beside the build rather than piling
+            # starting purchases, skills and talents above it on short screens.
+            left = (inner-gap)//2
+            right = inner-gap-left
+            y = max(stack([self.skill, self.items, self.talents], margin, y, left),
+                    stack(self.references, margin+left+gap, y, right))
         elif split:
             left = (inner-gap)//2
             right = inner-gap-left
@@ -272,6 +281,8 @@ class Overlay(QWidget):
         candidates = [(w, False) for w in widths if w <= 390]
         if auxiliary:
             candidates += [(w, True) for w in widths if w >= 420]
+            if any(not w.isHidden() for w in self.references):
+                candidates += [(w, 2) for w in widths if w >= 420]
             if max_width >= 540:
                 candidates.append((max_width, 3))
         candidates += [(w, False) for w in widths if w > 390]
@@ -285,7 +296,10 @@ class Overlay(QWidget):
                 placements, height = self._arrange(width, split)
                 measured.append((width, height, placements, split, size))
             layouts.extend(measured)
-            selected = next((layout for layout in measured if layout[1] <= bounds.bottom()-anchor-8), None)
+            fitting = [layout for layout in measured if layout[1] <= bounds.bottom()-anchor-8]
+            # Prefer a thin overlay; at equal width choose the shorter layout
+            # so a long reference cannot leave a mostly empty adjacent column.
+            selected = min(fitting, key=lambda v: (v[0], v[1])) if fitting else None
             if selected:
                 break
         if selected is None:

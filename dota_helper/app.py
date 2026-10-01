@@ -559,6 +559,12 @@ class MainWindow(QMainWindow):
         self.hotkey.currentIndexChanged.connect(self.change_hotkey)
         form.addRow(self.overlay_enabled)
         form.addRow(self.preview)
+        self.hero_references = QCheckBox('Show hero spell / combo references')
+        self.hero_references.setChecked(self.settings.get('hero_references', True))
+        self.hero_references.setToolTip('Show extra Invoker, Kez and Shadow Shaman tips. '
+                                       'Turning this off keeps item builds, skills, talents and lane timers.')
+        self.hero_references.toggled.connect(self.change_hero_references)
+        form.addRow(self.hero_references)
         form.addRow(button("Position below top-right game stats", self.overlay.place_top_right))
         form.addRow("Opacity", self.opacity)
         form.addRow("Toggle shortcut", self.hotkey)
@@ -1610,9 +1616,10 @@ class MainWindow(QMainWindow):
                                  f"Shortcut: {'registered' if self.hotkey_ok else 'unavailable / in use'}\n"
                                  f"API: {self.api_status}\nMetadata snapshot: bundled OpenDota constants; patch {patch_name(PATCHES[-1]['id'])}")
         draft_text = self.draft.overlay_text()
-        self.overlay.show_invoker(self.hero.currentData() == invoker.HERO_ID and not draft_text)
-        self.overlay.show_kez(self.hero.currentData() == kez.HERO_ID and not draft_text)
-        self.overlay.show_shadow_shaman(self.hero.currentData() == shadow_shaman.HERO_ID and not draft_text)
+        show_reference = self.hero_references.isChecked() and not draft_text
+        self.overlay.show_invoker(self.hero.currentData() == invoker.HERO_ID and show_reference)
+        self.overlay.show_kez(self.hero.currentData() == kez.HERO_ID and show_reference)
+        self.overlay.show_shadow_shaman(self.hero.currentData() == shadow_shaman.HERO_ID and show_reference)
         self.export_guide_button.setEnabled(route is not None)
         timer_text=self.lane_timers.text(second,clock_status,self.role.currentData(),
                                         HEROES.get(str(self.hero.currentData()),{}),bool(draft_text))
@@ -1884,6 +1891,11 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(0)
             self.request_selection_builds()
 
+    def change_hero_references(self, enabled):
+        self.settings['hero_references'] = enabled
+        self.save_settings()
+        self.tick()
+
     def save_settings(self):
         if hasattr(self, "opacity"):
             self.settings.pop("lane", None)
@@ -1891,7 +1903,8 @@ class MainWindow(QMainWindow):
                                  opacity=self.opacity.value(), monitor=self.monitor.value(), hotkey=self.hotkey.currentData(),
                                  overlay_x=self.overlay.x(), overlay_y=self.overlay.preferred_y,
                                  overlay_w=self.overlay.preferred_width, overlay_h=self.overlay.height(),
-                                 overlay_font=self.overlay.font_size, supply_minutes=self.supply_minutes.value())
+                                 overlay_font=self.overlay.font_size, supply_minutes=self.supply_minutes.value(),
+                                 hero_references=self.hero_references.isChecked())
         profile.save_settings(self.settings_file, self.settings)
 
     def closeEvent(self, event):
