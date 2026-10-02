@@ -4,6 +4,8 @@ from statistics import median, quantiles
 
 from .catalog import ABILITY_IDS, ITEMS, item_name
 from .models import Purchase, Route
+from .ratings import numeric_mmr, rank_tier
+from .endgame import inventory_keys
 
 
 # These are useful milestones even if they later become part of an upgrade.
@@ -24,13 +26,12 @@ OVERLAY_EXCLUDED = frozenset({
 
 
 def starting_buy_text(route):
-    """Count every recorded starting purchase, including same-second repeats."""
-    from .starting_items import counts as starting_counts
-    counts = starting_counts(route)
-    from .starting_items import estimated_branches
-    inferred=estimated_branches(route)
-    return ', '.join(f'{item_name(key)} ×{count}'+(' (estimated)' if key=='branches' and inferred else '')
-                     for key, count in counts.items())
+    """Display assembled starting items, preserving source-backed quantities."""
+    from .starting_items import summary
+    evidence = summary(route)
+    suffix = '+' if evidence['unverified'] else ''
+    return ', '.join(f'{item_name(key)} ×{count}{suffix}'
+                     for key, count in evidence['counts'].items())
 
 
 def overlay_build_purchases(route, second=300):
@@ -97,13 +98,22 @@ def normalize(match, player, evidence):
         return None
     counts = Counter()
     purchases = []
+    starting_incomplete = False
+    from .starting_events import purchase_count
     for event in sorted(log, key=lambda e: e.get("time", 0)):
         key, second = event.get("key"), event.get("time")
         if not isinstance(key, str) or not isinstance(second, (int, float)):
             continue
-        # Keep recipes/components as separate observed events, never inferred completions.
-        counts[key] += 1
-        purchases.append(Purchase(key, int(second), counts[key]))
+        # Initial OpenDota inventory events can contain multiple packs/items in
+        # one stack. Later transaction events always represent one purchase.
+        quantity = purchase_count(event)
+        if quantity is None:
+            quantity = 1
+            starting_incomplete = starting_incomplete or second < 0
+        # Recipe assembly belongs to presentation; keep observed units here.
+        for _ in range(quantity):
+            counts[key] += 1
+            purchases.append(Purchase(key, int(second), counts[key]))
     major = [p for p in purchases if p.time >= 0 and ITEMS.get(p.key, {}).get("cost", 0) >= 1800
              and not p.key.startswith("recipe_")]
     if not purchases or not major:
@@ -117,9 +127,15 @@ def normalize(match, player, evidence):
         purchases=purchases, skills=skills, match_ids=[match["match_id"]],
         start_time=match.get("start_time", 0), evidence=evidence,
         player=player.get("name") or player.get("personaname") or "Unnamed player",
-        average_mmr=(int(match['avg_mmr']) if type(match.get('avg_mmr')) in (int, float)
-                     and 0 < match['avg_mmr'] < 30000 else None),
+        average_mmr=numeric_mmr(match.get('avg_mmr')),
+        average_mmr_source='OpenDota avg_mmr' if numeric_mmr(match.get('avg_mmr')) is not None else '',
+        average_rank=rank_tier(match.get('avg_rank_tier'), average=True),
+        average_rank_source='OpenDota match average' if rank_tier(match.get('avg_rank_tier'), average=True) is not None else '',
+        final_items=inventory_keys([player.get(f'item_{i}') for i in range(6)]),
+        match_rank=rank_tier(match.get('avg_rank_tier'), average=True),
+        match_rank_source='OpenDota match average' if rank_tier(match.get('avg_rank_tier'), average=True) is not None else '',
         facet=player.get("hero_variant"),
+        starting_items_incomplete=starting_incomplete,
         result=("Won" if (player["player_slot"] < 128) == match["radiant_win"] else "Lost") if isinstance(match.get("radiant_win"), bool) else "Unknown",
         warnings=["Purchase-log timings; courier delivery is not measured.",
                   "Position is estimated by OpenDota. Skill entries are upgrade order, not exact hero levels."],
@@ -133,28 +149,23 @@ def signature(route):
 
 
 def rank_routes(routes, role, lane, current_patch, now):
+    from .recency import in_recent_window
     # Unknown role is not a match. Never silently substitute a carry build for support.
-    matching = [r for r in routes if r.role == role and (not lane or r.lane == lane)]
-    recent = [r for r in matching if now - r.start_time <= 14 * 86400 and r.patch == current_patch]
-    if not recent:
-        recent = [r for r in matching if now - r.start_time <= 60 * 86400 and r.patch == current_patch]
-    if not recent:
-        recent = [r for r in matching if now - r.start_time <= 60 * 86400]
+    recent = [r for r in routes if r.role == role and (not lane or r.lane == lane)
+              and in_recent_window(r.start_time, now)]
     groups = defaultdict(list)
     for route in recent:
         groups[(route.patch, route.facet, signature(route))].append(route)
     results = []
-    for group in sorted(groups.values(), key=lambda g: (g[0].patch == current_patch, len(g), max(r.start_time for r in g)), reverse=True):
+    for group in sorted(groups.values(), key=lambda g: (len(g), max(r.start_time for r in g)), reverse=True):
         representative = max(group, key=lambda r: r.start_time)
+        representative.warnings = [warning for warning in representative.warnings
+                                   if not warning.startswith(('OLDER PATCH', 'Expanded to a 60-day'))]
         representative.match_ids = list(dict.fromkeys(mid for r in group for mid in r.match_ids))
         representative.warnings.append("Route and skill sequence shown from the newest example; timing ranges use matching item-order samples.")
         evidence_types = set(r.evidence for r in group)
         if len(evidence_types) > 1:
             representative.warnings.append("Timing sample includes multiple evidence types: " + "; ".join(sorted(evidence_types)))
-        if representative.patch != current_patch:
-            representative.warnings.append("OLDER PATCH fallback: current-patch samples unavailable.")
-        if now - representative.start_time > 14 * 86400:
-            representative.warnings.append("Expanded to a 60-day sample window.")
         if len(group) < 3:
             representative.warnings.append("Small sample: example timings, not population benchmarks.")
         for purchase in representative.purchases:
@@ -166,6 +177,4 @@ def rank_routes(routes, role, lane, current_patch, now):
                 qs = quantiles(values, n=4, method="inclusive")
                 purchase.low, purchase.high = int(qs[0]), int(qs[2])
         results.append(representative)
-        if len(results) == 3:
-            break
     return results

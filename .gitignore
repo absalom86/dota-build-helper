@@ -26,6 +26,7 @@ gamestate_integration_*.cfg
 # Local investigations and game captures are not part of the public project.
 docs/*
 !docs/USER_GUIDE.md
+!docs/RELEASING.md
 !docs/screenshots/
 docs/screenshots/*
 !docs/screenshots/desktop-demo.png

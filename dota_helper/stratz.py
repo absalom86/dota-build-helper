@@ -21,11 +21,14 @@ from .credentials import load_token
 from .fast_lookup import DeadlineJobs
 from .paths import user_data_dir
 from .providers import DataError
-from .ranking import ranked
+from .ranking import build_signature, ranked
+from .ratings import rank_tier
+from .endgame import inventory_keys
+from .recency import RECENT_DAYS, cutoff, in_recent_window
 
-SUMMARY = "id startDateTime gameVersionId rank lobbyType leagueId"
+SUMMARY = "id startDateTime gameVersionId rank actualRank averageRank lobbyType leagueId"
 PLAYER = "heroId steamAccountId position playerSlot isRadiant variant steamAccount {name seasonRank seasonLeaderboardRank proSteamAccount {name}}"
-DETAIL = SUMMARY + " didRadiantWin players {" + PLAYER + " stats {itemPurchases {time itemId}} abilities {abilityId time level isTalent}}"
+DETAIL = SUMMARY + " didRadiantWin players {" + PLAYER + " item0Id item1Id item2Id item3Id item4Id item5Id stats {itemPurchases {time itemId}} abilities {abilityId time level isTalent}}"
 ITEM_KEYS = {int(v['id']): k for k, v in ITEMS.items() if v.get('id') is not None}
 
 
@@ -136,7 +139,7 @@ class Stratz:
         if jobs.cancel.is_set():
             raise DataError("Search cancelled")
         if event is None:
-            raise DataError("STRATZ lookup exceeded the 8-second budget. Try again shortly.")
+            raise DataError("STRATZ lookup time budget reached. Cached responses are kept; try again shortly.")
         _, data, error = event
         if error:
             raise error
@@ -154,13 +157,13 @@ class Stratz:
         versions, routes, attempted, fingerprints = {}, [], set(), set()
         skipped = Counter()
         offset, scanned, reported, exhausted = 0, 0, 0, False
-        pending, older_pending, failure = [], [], None
-        expanded = False
+        pending, failure = [], None
         player_fallback_round = 0
         history_accounts = set()
         history_ids = set()
         history_players_checked = 0
         history_matches_checked = 0
+        rated_status = ''
 
         def page_query(first):
             # Pagination is on guides, NOT on the outer hero-group field.
@@ -168,15 +171,29 @@ class Stratz:
 
         def publish():
             if routes and on_update:
-                on_update((ranked(routes), f'STRATZ · {len(routes)}/10 distinct builds ready · searching for remaining games…'))
+                on_update((ranked(routes), f'STRATZ · {len(routes)} games ready · {len(fingerprints)} distinct builds · checking remaining examples…'))
+
+        rated_candidates = getattr(self, 'rated_candidates', None)
+        if rated_candidates and not cancel.is_set() and time.monotonic() < jobs.deadline:
+            from .rated_builds import rated_routes
+            def accept_rated(result):
+                nonlocal routes
+                routes = ranked(routes + result[0])
+                attempted.update(mid for route in result[0] for mid in route.match_ids)
+                fingerprints.update(build_signature(route) for route in result[0])
+                publish()
+            try:
+                result = rated_routes(self, hero_id, role, rated_candidates, progress, cancel,
+                                      deadline=started + min(2, max(0, jobs.deadline - started) / 2),
+                                      on_update=accept_rated)
+                accept_rated(result)
+                rated_status = result[1]
+            except DataError as exc:
+                rated_status = 'Recorded-MMR discovery unavailable: ' + str(exc)
 
         progress('STRATZ · searching ranked games for this hero and position…')
-        while len(routes) < 10 and time.monotonic() < jobs.deadline and not cancel.is_set():
-            if not pending and exhausted and older_pending:
-                pending = sorted(older_pending, key=lambda pair: pair[0]['startDateTime'], reverse=True)
-                older_pending = []
-                expanded = True
-            if not pending and exhausted and not older_pending and player_fallback_round < 2:
+        while time.monotonic() < jobs.deadline and not cancel.is_set():
+            if not pending and exhausted and player_fallback_round < 2:
                 player_fallback_round += 1
                 progress('STRATZ · guide list exhausted; checking high-ranked player histories…')
                 try:
@@ -194,9 +211,11 @@ class Stratz:
                     if accounts:
                         history_accounts.update(accounts)
                         history_players_checked += len(accounts)
-                        since = int(datetime.fromisoformat(PATCHES[-1]['date'].replace('Z','+00:00')).timestamp())
+                        # Stable query keys reuse cached history pages; exact
+                        # rolling-window eligibility is checked on every game.
+                        since = int(cutoff()) // 3600 * 3600
                         fields = ' '.join(f'p{i}:player(steamAccountId:{int(account)}){{matches(request:{{heroIds:[{hero_id}],'
-                            f'positionIds:[POSITION_{role}],startDateTime:{since},take:10,lobbyTypeIds:[7],rankIds:[80]}})'
+                            f'positionIds:[POSITION_{role}],startDateTime:{since},take:50,lobbyTypeIds:[7],rankIds:[80]}})'
                             '{' + SUMMARY + f' players(steamAccountId:{int(account)})' + '{' + PLAYER + '}}}'
                             for i,account in enumerate(accounts))
                         histories = self.bounded(jobs,'{'+fields+'}')
@@ -208,7 +227,6 @@ class Stratz:
                                         pending.append((match,player))
                                         history_ids.add(match['id'])
                         pending.sort(key=lambda pair:pair[0]['startDateTime'],reverse=True)
-                        expanded = True
                     else:
                         skipped['no matching active leaderboard players'] += 1
                 except DataError as exc:
@@ -243,25 +261,20 @@ class Stratz:
                               'steamAccountId':guide.get('steamAccountId'), 'position':f'POSITION_{role}'}
                     if match and player.get('steamAccountId') and eligible(match,player,hero_id,role):
                         pending.append((match,player))
-                    elif match and player.get('steamAccountId') and eligible(match,player,hero_id,role,recent=False):
-                        older_pending.append((match,player))
                     else:
                         skipped['outside recent Immortal criteria or missing ID'] += 1
                 exhausted = len(guides) < 50 or (reported > 0 and offset + len(guides) >= reported)
                 offset += 50
-            # Source summaries already identify game versions. Prioritize those
-            # that agree with bundled metadata before spending detail requests.
+            # Prioritize professional examples, then recency across patches.
             def candidate_key(pair):
                 match, player = pair
-                version = versions.get(match.get('gameVersionId'), '')
-                major = re.match(r'^\d+\.\d+', version)
-                verified = bool(major and major[0] == PATCHES[-1]['name'])
                 account = player.get('steamAccount') or {}
                 tier = 2 if match.get('leagueId') and match.get('lobbyType') == 'PRACTICE' else int(bool((account.get('proSteamAccount') or {}).get('name')))
-                return verified, tier, match.get('startDateTime', 0)
+                return tier, match.get('startDateTime', 0)
             pending.sort(key=candidate_key, reverse=True)
             selected = {}
-            while pending and len(selected) < 10 - len(routes):
+            # Ten is a request batch size, never a result or search target.
+            while pending and len(selected) < 10:
                 match, player = pending.pop(0)
                 mid = match['id']
                 if mid in attempted:
@@ -269,11 +282,11 @@ class Stratz:
                 attempted.add(mid)
                 selected[mid] = player
             if not selected:
-                if exhausted and not older_pending and player_fallback_round >= 2:
+                if exhausted and player_fallback_round >= 2:
                     break
                 continue
             ids = list(selected)
-            progress(f'STRATZ · {len(routes)}/10 ready · loading {len(ids)} further games…')
+            progress(f'STRATZ · {len(routes)} games ready · loading {len(ids)} further games…')
             try:
                 details = self.bounded(jobs, '{' + reference_query(ids, details=True,
                                               accounts={mid:p.get('steamAccountId') for mid,p in selected.items()}) + '}')
@@ -285,7 +298,7 @@ class Stratz:
                 if not match:
                     skipped['match unavailable'] += 1
                     continue
-                actual = [p for p in match.get('players',[]) if eligible(match,p,hero_id,role,recent=not expanded and mid not in refs,allow_league=mid in refs)]
+                actual = [p for p in match.get('players',[]) if eligible(match,p,hero_id,role,allow_league=mid in refs)]
                 if len(actual) != 1:
                     skipped['actual rank/position mismatch'] += 1
                     continue
@@ -293,11 +306,7 @@ class Stratz:
                 if not route or not route.skills:
                     skipped['purchase or skill history unavailable'] += 1
                     continue
-                signature = (tuple(p.key for p in route.purchases), tuple(route.skills))
-                if signature in fingerprints:
-                    skipped['duplicate purchase and skill sequence'] += 1
-                    continue
-                fingerprints.add(signature)
+                fingerprints.add(build_signature(route))
                 if mid in refs:
                     route.warnings.insert(0,'User-provided reference game, fetched independently from STRATZ.')
                 if mid in history_ids:
@@ -306,21 +315,26 @@ class Stratz:
             publish()
         if cancel.is_set():
             raise DataError('Search cancelled')
-        status = (f'STRATZ · {len(routes)}/10 distinct builds in {time.monotonic()-started:.2f}s · '
+        status = (f'STRATZ · {len(routes)} games · {len(fingerprints)} distinct builds in {time.monotonic()-started:.2f}s · '
                   f'{scanned} guide summaries checked ({reported} reported). ')
         if refs:
             status += f'{sum(r.match_ids[0] in refs for r in routes)}/{len(refs)} reference games loaded. '
-        if expanded:
-            status += 'Expanded to the bundled patch-date window; older examples are labeled. '
+        status += f'Last {RECENT_DAYS} days across patches. '
         if player_fallback_round:
             status += f'{history_players_checked} player histories checked ({history_matches_checked} match records). '
-        if len(routes) < 10:
-            status += ('Available guide list and sampled player histories exhausted. ' if exhausted and not pending and not older_pending and player_fallback_round >= 2 and not failure else 'Partial search; retry continues from cached pages. ')
+        complete = exhausted and not pending and player_fallback_round >= 2 and not failure
+        if complete:
+            status += 'Available guide list and sampled player histories exhausted. '
+        else:
+            status += ('Search deadline reached; ' if time.monotonic() >= jobs.deadline else 'Partial search; ')
+            status += 'retry continues from cached pages. '
         if skipped:
             status += 'Excluded: ' + '; '.join(f'{v} {k}' for k,v in sorted(skipped.items())) + '. '
         if failure:
             status += failure + ' '
-        status += 'Ranked pubs: Immortal bracket; reference league games labeled separately. Numeric MMR unavailable. Check patch evidence.'
+        if rated_status:
+            status += rated_status + ' '
+        status += 'Ranked pubs: Immortal bracket; reference league games labeled separately. Numeric MMR is included only where recorded.'
         if not routes and failure:
             raise DataError(status)
         return ranked(routes),status
@@ -333,8 +347,8 @@ class Stratz:
         match = data.get('m0')
         if not match:
             raise DataError("This match is currently unavailable in STRATZ.")
-        if not datetime.fromisoformat(PATCHES[-1]['date'].replace('Z','+00:00')).timestamp() <= match.get('startDateTime',0) <= time.time():
-            raise DataError("This STRATZ game is outside the bundled patch-date window.")
+        if not in_recent_window(match.get('startDateTime')):
+            raise DataError(f"This STRATZ game is outside the last {RECENT_DAYS} days.")
         for player in match.get('players', []):
             if player.get('heroId') == hero_id and player.get('position') == f'POSITION_{role}':
                 route = normalize_stratz(match, player, {v['id']:v['name'] for v in data['constants']['gameVersions']})
@@ -344,11 +358,13 @@ class Stratz:
 
 
 def eligible(match, player, hero_id, role, recent=True, allow_league=False):
-    cutoff = time.time() - 7 * 86400 if recent else datetime.fromisoformat(PATCHES[-1]['date'].replace('Z','+00:00')).timestamp()
+    # Retain the recent argument for callers; all discovery uses one time window.
+    brackets = [rank_tier(match.get(key)) for key in ('rank', 'actualRank')]
     return (player.get('heroId') == hero_id and player.get('position') == f'POSITION_{role}'
-            and match.get('rank') == 80 and (match.get('lobbyType') == 'RANKED' or
+            and 80 in brackets and not any(value is not None and value < 80 for value in brackets)
+            and (match.get('lobbyType') == 'RANKED' or
                 (allow_league and match.get('lobbyType') == 'PRACTICE' and (match.get('leagueId') or 0) > 0))
-            and cutoff <= match.get('startDateTime', 0) <= time.time()
+            and in_recent_window(match.get('startDateTime'))
             and not (0 < ((player.get('steamAccount') or {}).get('seasonRank') or 0) < 80))
 
 
@@ -359,11 +375,17 @@ def normalize_stratz(match, player, versions):
     abilities = sorted(player.get('abilities') or [], key=lambda a:a.get('time',0))
     account = player.get('steamAccount') or {}
     role = int(player['position'].split('_')[-1])
-    source_patch = versions.get(match.get('gameVersionId'), f"version {match.get('gameVersionId')}")
-    bundled_patch = PATCHES[-1]['name']
-    major = re.match(r'^\d+\.\d+', source_patch)
-    agrees = major and major[0] == bundled_patch
-    evidence = ('Match bracket Immortal' if match.get('rank') == 80 else f"Match bracket {match.get('rank', 'unknown')}")
+    source_patch = versions.get(match.get('gameVersionId'))
+    source_patch = source_patch.strip() if isinstance(source_patch, str) else ''
+    major = re.fullmatch(r'(\d+\.\d+)[a-z]?', source_patch, re.IGNORECASE)
+    patch_id = next((patch['id'] for patch in PATCHES
+                     if major and patch['name'] == major[1]), 0)
+    bracket = rank_tier(match.get('rank'))
+    bracket_source = 'STRATZ match bracket'
+    if bracket is None:
+        bracket = rank_tier(match.get('actualRank'))
+        bracket_source = 'STRATZ actualRank bracket'
+    evidence = ('Match bracket Immortal' if bracket == 80 else f"Match bracket {bracket if bracket is not None else 'unknown'}")
     if account.get('seasonLeaderboardRank'):
         evidence += f" · player leaderboard #{account['seasonLeaderboardRank']} (profile)"
     evidence += " · numeric MMR unavailable"
@@ -372,13 +394,18 @@ def normalize_stratz(match, player, versions):
     explicit_slot = player.get('playerSlot')
     slot = (explicit_slot if type(explicit_slot) is int and explicit_slot >= 0 else 0) % 128 + (0 if player.get('isRadiant') else 128)
     route = normalize({'match_id':match['id'],'start_time':match.get('startDateTime',0),
-                       'radiant_win':match.get('didRadiantWin'), 'patch':PATCHES[-1]['id'] if agrees else 0},
+                       'radiant_win':match.get('didRadiantWin'), 'patch':patch_id},
                       {'hero_id':player['heroId'],'player_slot':slot,'name':(account.get('proSteamAccount') or {}).get('name') or account.get('name'),
                        'position_est':role,'purchase_log':purchases,'ability_upgrades_arr':[a['abilityId'] for a in abilities],
                        'hero_variant':player.get('variant')}, evidence)
     if route:
         route.id = f"stratz:{match['id']}:{slot}"
         route.source = 'STRATZ'
+        route.final_items = inventory_keys([player.get(f'item{i}Id') for i in range(6)])
+        route.match_rank = bracket
+        route.match_rank_source = bracket_source if bracket is not None else ''
+        route.average_rank = rank_tier(match.get('averageRank'), average=True)
+        route.average_rank_source = 'STRATZ averageRank' if route.average_rank is not None else ''
         account_id = player.get('steamAccountId')
         route.account_id = account_id if type(account_id) is int and account_id > 0 else None
         is_radiant = player.get('isRadiant')
@@ -387,14 +414,9 @@ def normalize_stratz(match, player, versions):
                               (is_radiant is False and 128 <= explicit_slot <= 132)) else None)
         route.pro_player = bool((account.get('proSteamAccount') or {}).get('name'))
         route.tournament = match.get('lobbyType') == 'PRACTICE' and bool(match.get('leagueId'))
-        route.patch_label = source_patch if agrees else f"unverified (STRATZ {source_patch}; bundled {bundled_patch})"
+        route.patch_label = source_patch or 'Unknown'
         route.warnings = ["Exact STRATZ purchase events and observed skill upgrade sequence. Skill level fields are ability ranks, not hero levels.",
                           "Starting purchase events are not a complete inventory snapshot; components or quantities may be missing from this source.",
                           "Position comes from STRATZ. Timings describe purchases, not courier delivery.",
                           "Guide discovery is STRATZ's curated subset, not D2PT's complete tracked match list."]
-        if not agrees:
-            route.warnings.insert(0, "PATCH UNVERIFIED: STRATZ's version metadata conflicts with the bundled patch metadata. This game is not certified current-patch.")
-        age_days = int((time.time()-route.start_time)/86400)
-        if age_days >= 7:
-            route.warnings.insert(0, f"OLDER EXAMPLE: {age_days} days old. Included from the bundled patch-date window; source patch evidence still applies.")
     return route

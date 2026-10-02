@@ -1,9 +1,9 @@
-"""One bounded recommendation list, patch evidence before source preferences."""
+"""Bounded discovery with all usable games retained, patch evidence first."""
 import threading
 import time
 from .providers import DataError
 from .tournaments import tournament_routes
-from .ranking import RANKING_DESCRIPTION, patch_group, ranked
+from .ranking import RANKING_DESCRIPTION, ranked
 
 
 def recommended_routes(client,hero,role,progress=lambda _:None,cancel=None,on_update=None):
@@ -23,8 +23,8 @@ def recommended_routes(client,hero,role,progress=lambda _:None,cancel=None,on_up
         issues.append(result[1])
     except DataError as exc:
         issues.append(str(exc))
-    # A full list of unknown/older tournament patches must not block current pubs.
-    if sum(patch_group(route) == 2 for route in routes)<10 and time.monotonic()<deadline and not cancel.is_set():
+    # Retain tournament options and use the remaining shared budget for pubs.
+    if time.monotonic()<deadline and not cancel.is_set():
         try:
             result=client.routes(hero,role,progress,cancel,publish,reference_ids=[],deadline=deadline)
             publish(result)
@@ -36,8 +36,8 @@ def recommended_routes(client,hero,role,progress=lambda _:None,cancel=None,on_up
     if not routes:
         raise DataError('No usable builds. '+' '.join(issues))
     status=(f'{len(routes)} builds in {time.monotonic()-started:.2f}s · {RANKING_DESCRIPTION}. '
-            'Newest games within each preference; team strength is not ranked. ')
+            'Equal ratings use newest first; team strength is not ranked. ')
     # Keep source failures explicit without confusing the unified list with source-only labels.
-    if any(any(marker in s.lower() for marker in ('refresh unavailable','directory fallback','request limit','deadline','http','timed out')) for s in issues):
+    if any(any(marker in s.lower() for marker in ('refresh unavailable','directory fallback','request limit','deadline','http','timed out','partial search')) for s in issues):
         status+='Some discovery was unavailable or incomplete. '+' '.join(issues)
     return routes,status

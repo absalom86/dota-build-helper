@@ -1,4 +1,4 @@
-param([string]$Compiler = '', [string]$Version = '0.1.3', [switch]$RebuildExe, [string]$ExePath = 'dist\DotaBuildHelper.exe')
+param([string]$Compiler = '', [string]$Version = '0.1.35', [switch]$RebuildExe, [string]$ExePath = 'dist\DotaBuildHelper.exe')
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 if ($RebuildExe) { & .\build-exe.ps1 }

@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.3"
+  #define AppVersion "0.1.35"
 #endif
 #ifndef AppExecutable
   #define AppExecutable "..\dist\DotaBuildHelper.exe"
@@ -45,4 +45,11 @@ Name: "{group}\Quick setup"; Filename: "{app}\START-HERE.txt"
 Name: "{autodesktop}\Dota Build Helper"; Filename: "{app}\DotaBuildHelper.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\DotaBuildHelper.exe"; Description: "Launch Dota Build Helper"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\DotaBuildHelper.exe"; Description: "Launch Dota Build Helper"; Flags: nowait postinstall skipifsilent; Check: not IsUpdate
+Filename: "{app}\DotaBuildHelper.exe"; Flags: nowait; Check: IsUpdate
+
+[Code]
+function IsUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;

@@ -96,18 +96,43 @@ def test_guide_retains_laning_supplies_with_repeated_quantities_and_timings(rout
     assert [vars(p) for p in route.purchases] == original
 
 
-def test_corrections_and_estimates_export_consistently(route):
+def test_corrections_and_unverified_minima_export_consistently(route):
     route.purchases = [Purchase('branches', -30), Purchase('boots', 100)]
     route.source = 'STRATZ'
-    estimated = parse_kv(guides.build_text(route))
-    assert dict(dict(estimated['ItemBuild'])['Items'])['Starting items'].count(('item', 'item_branches')) == 2
-    assert 'estimated' in estimated['Overview'] and 'incomplete' in estimated['Overview']
+    recorded = parse_kv(guides.build_text(route))
+    assert dict(dict(recorded['ItemBuild'])['Items'])['Starting items'].count(('item', 'item_branches')) == 1
+    assert 'estimated' not in recorded['Overview'] and 'incomplete' in recorded['Overview']
+    tooltip = dict(dict(recorded['ItemBuild'])['ItemTooltips'])['item_branches']
+    assert 'Minimum recorded quantity; exact count unavailable' in tooltip
     starting_items.save(route, {'branches': 5, 'ward_observer': 1})
     corrected = parse_kv(guides.build_text(route))
     initial = dict(dict(corrected['ItemBuild'])['Items'])['Starting items']
     assert initial.count(('item', 'item_branches')) == 5
     assert ('item', 'item_ward_observer') in initial
     assert 'incomplete' not in corrected['Overview'] and 'estimated' not in corrected['Overview']
+
+
+def test_wand_export_combines_starting_parts_and_retains_only_spare_branches(route):
+    route.purchases = [Purchase('branches', -60, index + 1) for index in range(3)]
+    route.purchases += [Purchase('magic_stick', -60), Purchase('recipe_magic_wand', -60)]
+    original = [vars(p).copy() for p in route.purchases]
+    result = parse_kv(guides.build_text(route))
+    item_build = dict(result['ItemBuild'])
+    initial = dict(item_build['Items'])['Starting items']
+    assert sorted(initial) == [('item', 'item_branches'), ('item', 'item_magic_wand')]
+    assert 'Components combined' in dict(item_build['ItemTooltips'])['item_magic_wand']
+    assert [vars(p) for p in route.purchases] == original
+
+
+def test_guide_does_not_create_wand_or_recipe_from_incomplete_parts(route):
+    route.purchases = [Purchase('branches', -60), Purchase('branches', -60, 2),
+                       Purchase('magic_stick', -60)]
+    result = parse_kv(guides.build_text(route))
+    initial = dict(dict(result['ItemBuild'])['Items'])['Starting items']
+    assert initial.count(('item', 'item_branches')) == 2
+    assert ('item', 'item_magic_stick') in initial
+    assert ('item', 'item_magic_wand') not in initial
+    assert ('item', 'item_recipe_magic_wand') not in initial
 
 
 def test_names_are_escaped_and_files_stay_distinct(route):

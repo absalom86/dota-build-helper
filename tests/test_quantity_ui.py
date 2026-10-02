@@ -135,6 +135,48 @@ def test_old_generation_result_does_not_prompt_or_change_current_quantities(quan
     assert starting_items.correction(routes[0]) is None
 
 
+@pytest.mark.parametrize('wand', [False, True])
+def test_compatible_counts_refresh_table_preview_overlay_and_export(quantity_ui, monkeypatch, wand):
+    window, routes, workers, _, _ = quantity_ui
+    route = routes[0]
+    if wand:
+        route.purchases = [Purchase(key, -89) for key in
+                           ('magic_stick', 'branches', 'recipe_magic_wand', 'faerie_fire')]
+        keys = ['magic_wand', 'faerie_fire', 'faerie_fire']
+        expected = {'magic_wand': 1, 'faerie_fire': 2}
+    else:
+        keys = ['branches'] * 5 + ['tango']
+        expected = {'branches': 5, 'tango': 1}
+    original = [vars(p).copy() for p in route.purchases]
+    window.render_routes()
+    monkeypatch.setattr(QMessageBox, 'question', lambda *_: pytest.fail('Compatible evidence needs no manual correction'))
+    window.verify_starting_quantities(True)
+
+    class Client:
+        def get(self, *_args, **_kwargs):
+            return {'match_id': 100, 'players': [{'hero_id': 1, 'account_id': 12345, 'player_slot': 0,
+                    'purchase_log': [{'key': key, 'time': -89} for key in keys]}]}
+
+    result = quantity_evidence.verify_selected(route, Client())
+    workers[0]['done'](result)
+    assert starting_items.counts(route) == expected
+    assert starting_items.correction(route) is None
+    assert [vars(p) for p in route.purchases] == original
+    assert '(recovered)' in window.quantity_preview.text()
+    assert 'OpenDota quantities' in window.overlay.initial_buy.text()
+    assert 'unverified' not in window.overlay.initial_buy.text()
+    assert 'estimated' not in window.overlay.initial_buy.text()
+    exported = guides.build_text(route)
+    assert 'same match and player' in exported
+    if wand:
+        assert 'Magic Wand ×1' in window.overlay.initial_buy.text()
+        assert 'Iron Branch' not in window.overlay.initial_buy.text()
+        assert 'item_recipe_magic_wand' not in exported
+    else:
+        assert 'Iron Branch ×5' in window.overlay.initial_buy.text()
+        assert exported.count('"item"\t\t"item_branches"') == 5
+
+
 def export_to_test_folder(window, route, tmp_path, monkeypatch):
     folder = tmp_path / 'chosen-guides'
     folder.mkdir(exist_ok=True)

@@ -1,4 +1,4 @@
-"""Starting quantities with explicit corrections and a labelled branch fallback."""
+"""Starting inventory with source evidence, recipe assembly and explicit corrections."""
 import json
 from collections import Counter
 from functools import lru_cache
@@ -49,47 +49,64 @@ def recorded_counts(route):
     """Count purchase events, not inventory slots or consumable charges."""
     return dict(Counter(p.key for p in route.purchases if p.time < 0))
 
-def counts(route):
-    corrected=correction(route)
-    if corrected is not None:
-        return corrected
-    values=recorded_counts(route)
-    if estimated_branches(route):
-        values['branches']=2
-    return values
+def summary(route):
+    """Use exact-player evidence only when it explains every recorded component.
 
-def estimated_branches(route):
-    if route.demo or route.source != 'STRATZ' or correction(route) is not None:
-        return False
-    values=Counter(p.key for p in route.purchases if p.time<0)
-    return (values['branches']==1 and
-            sum(n for k,n in values.items() if k not in ('ward_observer','ward_sentry','ward_dispenser'))<6)
+    STRATZ can omit duplicate starting purchases. Spare inventory space cannot
+    tell us whether the player bought one, two or five branches, so never guess.
+    """
+    from .item_recipes import assemble_counts
+    from .quantity_evidence import recoverable_counts
+    corrected = _correction_record(route)
+    if corrected is not None:
+        values = corrected['counts']
+        provenance, source = 'corrected', corrected['source']
+        note = corrected['note'] or 'Explicit quantities override the original purchase log.'
+    else:
+        recovered = recoverable_counts(route)
+        if recovered is not None:
+            values = recovered
+            provenance, source = 'recovered', 'OpenDota same-player starting log'
+            note = ('Starting quantities recovered from the same match and player. '
+                    'Recipe-expanded items agree with STRATZ; OpenDota preserves repeated copies. '
+                    'This is recorded starting-item evidence, not a complete purchase history.')
+        else:
+            values = recorded_counts(route)
+            provenance, source = 'recorded', route.source
+            note = ('Minimum recorded quantities; STRATZ may omit repeated starting purchases. '
+                    'Exact quantities are unavailable until a matching source or correction supplies them.'
+                    if route.source == 'STRATZ' and not route.demo else
+                    'Starting stack quantity is ambiguous; only minimum recorded copies are shown.'
+                    if route.starting_items_incomplete else
+                    'Recorded starting entries, not a complete purchase history.')
+    assembled = dict(assemble_counts(values))
+    if assembled != values:
+        from .catalog import item_name
+        parts = ', '.join(f'{item_name(key)} ×{count}' for key, count in values.items())
+        note += f' Components combined using the bundled item recipes. Before combining: {parts}.'
+    return {'counts': assembled, 'provenance': provenance, 'source': source, 'note': note,
+            'unverified': provenance == 'recorded' and not route.demo
+                          and (route.source == 'STRATZ' or route.starting_items_incomplete)}
+
+
+def counts(route):
+    return summary(route)['counts']
 
 def details(route):
     """Per-item quantity evidence for preview, editing, and native-guide notes.
 
-    A second purchase log can corroborate or disagree with the original log; it
-    never replaces the selected game's recorded counts without an explicit edit.
+    Raw events stay intact. Safe quantity recovery and recipe assembly are
+    derived views; contradictions still need an explicit correction.
     """
     recorded = recorded_counts(route)
-    corrected = _correction_record(route)
-    values = counts(route)
-    inferred = estimated_branches(route)
+    evidence = summary(route)
+    values = evidence['counts']
     from .quantity_evidence import get_saved
     comparison = get_saved(route)
     result = []
     for item, count in values.items():
-        if corrected is not None:
-            provenance, source = 'corrected', corrected['source']
-            note = corrected['note'] or 'Explicit quantities override the original purchase log.'
-        elif item == 'branches' and inferred:
-            provenance, source = 'estimated', 'STRATZ branch fallback'
-            note = 'Two branches assumed from one recorded branch and fewer than six non-ward purchases.'
-        else:
-            provenance, source = 'recorded', route.source
-            note = ('Recorded purchase events; STRATZ may omit starting quantities.'
-                    if route.source == 'STRATZ' else 'Recorded purchase events, not an inventory snapshot.')
-        if corrected is None and comparison:
+        provenance, source, note = (evidence[key] for key in ('provenance', 'source', 'note'))
+        if provenance == 'recorded' and comparison:
             if item in comparison.get('differences', {}):
                 alternate = comparison['differences'][item]['opendota']
                 note += f' OpenDota records {alternate}; review before applying.'
@@ -124,7 +141,7 @@ def save(route, values, source='User correction', note=''):
 
 
 def reset(route):
-    """Return to recorded counts and the usual labelled STRATZ-only estimate."""
+    """Return to source evidence, including safe exact-player quantity recovery."""
     path=user_data_dir() / 'starting-items.json'
     with _WRITE_LOCK:
         data=dict(load(path))

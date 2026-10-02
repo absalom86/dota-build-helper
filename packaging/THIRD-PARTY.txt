@@ -13,3 +13,7 @@ the license is included in the licenses directory.
 
 Provider data is fetched from OpenDota and STRATZ. This application is not
 affiliated with Valve, OpenDota, STRATZ or Dota2ProTracker.
+
+Dota 2 ability artwork belongs to Valve. Ability images are displayed from
+Valve's public Steam CDN; a small offline set is bundled. Image source URLs
+are recorded in dota_helper/data/ability_icons/SOURCES.json in the source tree.

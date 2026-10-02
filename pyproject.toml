@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dota-build-helper"
-version = "0.1.3"
+version = "0.1.35"
 description = "Local Dota 2 build companion with sourced match routes"
 requires-python = ">=3.12"
 dependencies = ["PySide6>=6.8,<7", "mss>=10,<11", "Pillow>=11,<13"]
@@ -19,7 +19,7 @@ dota-build-helper = "dota_helper.app:main"
 include = ["dota_helper*"]
 
 [tool.setuptools.package-data]
-dota_helper = ["data/*.json", "data/*.txt"]
+dota_helper = ["data/*.json", "data/*.txt", "data/ability_icons/*.png", "data/ability_icons/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -39,6 +39,33 @@ def test_purchase_quantities_and_negative_time_are_preserved():
     assert route.purchases[0].time < 0
 
 
+def test_opendota_starting_stacks_count_packs_without_multiplying_wand_charges():
+    from dota_helper import starting_items
+    match = match_fixture()
+    player = match['players'][0]
+    player['purchase_log'] = [
+        {'key': 'tango', 'time': -89, 'charges': 6},
+        {'key': 'faerie_fire', 'time': -89, 'charges': 2},
+        {'key': 'magic_wand', 'time': -89, 'charges': 20},
+        {'key': 'tango', 'time': 120, 'charges': 6},
+        {'key': 'bfury', 'time': 900},
+    ]
+    route = normalize(match, player, 'fixture')
+    assert starting_items.recorded_counts(route) == {'tango': 2, 'faerie_fire': 2, 'magic_wand': 1}
+    assert [(p.time, p.occurrence) for p in route.purchases if p.key == 'tango'] == [(-89, 1), (-89, 2), (120, 3)]
+    assert not route.starting_items_incomplete
+
+
+def test_ambiguous_starting_pack_retains_item_but_marks_quantity_incomplete():
+    from dota_helper import starting_items
+    match = match_fixture()
+    match['players'][0]['purchase_log'][0]['charges'] = 4
+    route = normalize(match, match['players'][0], 'fixture')
+    assert starting_items.recorded_counts(route)['tango'] == 1
+    assert route.starting_items_incomplete
+    assert starting_items.summary(route)['unverified']
+
+
 def test_no_timeline_no_fabricated_route():
     m = match_fixture()
     m["players"][0]["purchase_log"] = None
@@ -69,10 +96,27 @@ def test_benchmark_only_when_enough_samples():
     assert len(result[0].match_ids) == 3
 
 
-def test_single_sample_has_no_range_and_old_patch_is_labeled():
+def test_single_sample_has_no_range_and_prior_patch_is_not_a_fallback():
     result = rank_routes([route_fixture()], 1, 0, 61, time.time())[0]
     assert result.purchases[-1].low is None
-    assert any("OLDER PATCH" in w for w in result.warnings)
+    assert not any('older patch' in w.lower() or 'fallback' in w.lower() for w in result.warnings)
+
+
+def test_legacy_ranking_uses_ninety_days_without_patch_preference():
+    now = time.time()
+    prior, current, expired, future = [route_fixture() for _ in range(4)]
+    for index, route in enumerate((prior, current, expired, future)):
+        route.id = f'window:{index}'
+        route.match_ids = [index + 1]
+    prior.patch, prior.start_time = 60, now - 60 * 86400
+    prior.warnings += ['OLDER PATCH fallback: current-patch samples unavailable.']
+    current.patch, current.start_time = 61, now - 70 * 86400
+    expired.start_time = now - 91 * 86400
+    future.start_time = now + 86400
+    result = rank_routes([current, prior, expired, future], 1, 0, 61, now)
+    assert [route.id for route in result] == [prior.id, current.id]
+    assert not any('older patch' in warning.lower() or '60-day' in warning.lower()
+                   for route in result for warning in route.warnings)
 
 
 def test_route_switch_keeps_completion_and_skill_progress():

@@ -39,6 +39,7 @@ class DraftPanel(QWidget):
         self.provider_factory = DraftProvider
         self.meta_role=1
         self.meta_rows=[]
+        self.meta_data_status=''
         self.meta_status='Loading role statistics…'
         self.meta_active=True
         self.meta_busy=False
@@ -51,6 +52,9 @@ class DraftPanel(QWidget):
         self.meta_label=QTextBrowser()
         self.meta_label.setMinimumHeight(220)
         self.meta_label.setMaximumHeight(260)
+        self.meta_refresh = QPushButton('Refresh role rankings')
+        self.meta_refresh.clicked.connect(self.refresh_meta)
+        layout.addWidget(self.meta_refresh)
         layout.addWidget(self.meta_label)
         self.sync_status = QLabel("Waiting for game draft data · manual picks available below")
         self.sync_status.setWordWrap(True)
@@ -143,6 +147,7 @@ class DraftPanel(QWidget):
     def set_role(self,role):
         self.meta_role=role
         self.meta_rows=[]
+        self.meta_data_status=''
         self.meta_status='Loading role statistics…'
         self.render_meta()
         if self.auto_meta:
@@ -196,20 +201,25 @@ class DraftPanel(QWidget):
             return
         role=self.meta_role
         self.meta_busy=True
+        self.meta_refresh.setEnabled(False)
         self.meta_requested_role=role
         def done(result):
             self.meta_busy=False
+            self.meta_refresh.setEnabled(True)
             if role!=self.meta_role:
                 self.refresh_meta()
                 return
             self.meta_rows,self.meta_status=result
+            self.meta_data_status=self.meta_status
             self.render_meta()
         def failed(message):
             self.meta_busy=False
+            self.meta_refresh.setEnabled(True)
             if role!=self.meta_role:
                 self.refresh_meta()
                 return
-            self.meta_status='Role stats unavailable: '+message
+            self.meta_status=('Refresh failed: '+message+' · Saved stats: '+self.meta_data_status
+                              if self.meta_rows else 'Role stats unavailable: '+message)
             self.render_meta()
         self.launch_worker(lambda _:self.meta_provider(role),done,failed)
 
@@ -359,7 +369,7 @@ class DraftPanel(QWidget):
             self.use_hero.emit(pick.hero_id)
 
     def overlay_text(self):
-        if self.meta_active and not (self.overlay_enabled.isChecked() and self.picks):
+        if (self.meta_active or self.overlay_enabled.isChecked()) and not (self.overlay_enabled.isChecked() and self.picks):
             return (ROLES[self.meta_role],self.meta_text(),self.meta_status)
         if not self.overlay_enabled.isChecked():
             return None

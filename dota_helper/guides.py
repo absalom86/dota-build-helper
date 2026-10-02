@@ -13,7 +13,10 @@ import time
 
 from . import starting_items
 from .builds import overlay_sections
-from .catalog import HEROES, ITEMS, ROLES, ability_name, clock_text, patch_name
+from .catalog import HEROES, ITEMS, ROLES, ability_name, clock_text
+from .ratings import rating_text
+from .recency import neutral_patch_label, presentation_warnings
+from .endgame import six_slot_items
 
 
 def hero_key(route):
@@ -31,7 +34,7 @@ def filename(route):
 def title(route):
     hero = HEROES[str(route.hero_id)]['localized_name']
     source = (route.player if route.pro_player or route.tournament else
-              f'{route.average_mmr:,} MMR' if route.average_mmr else 'Match')
+              rating_text(route))
     match = str(route.match_ids[0]) if route.match_ids else route.id
     return f'Helper · {hero} {ROLES.get(route.role, "")} · {"DEMO" if route.demo else source} · {match}'[:127]
 
@@ -54,8 +57,25 @@ def _block(name, pairs, depth=0):
     return lines
 
 
-def build_text(route, *, now=None):
-    initial = {key: count for key, count in starting_items.counts(route).items() if key in ITEMS}
+def _endgame_reference(route, candidate):
+    if (candidate is not None and candidate.hero_id == route.hero_id
+            and candidate.role == route.role and six_slot_items(candidate)):
+        return candidate
+    return route
+
+
+def _endgame_credit(route):
+    matches = ', '.join(map(str, route.match_ids)) or 'unknown'
+    rating = rating_text(route)
+    if (route.pro_player or route.tournament) and route.player:
+        rating += f' · {route.player}'
+    patch = neutral_patch_label(route)
+    return f'{rating}. Source: {route.source}. Match IDs: {matches}. Patch: {patch}.'
+
+
+def build_text(route, *, now=None, endgame_route=None):
+    starting = starting_items.summary(route)
+    initial = {key: count for key, count in starting['counts'].items() if key in ITEMS}
     # A saved guide spans the entire match: early sections never expire here.
     sections = overlay_sections(route, second=None, supply_minutes=10)
     build_purchases = sorted(sections['items'] + sections['components'], key=lambda p: p.time)
@@ -70,14 +90,25 @@ def build_text(route, *, now=None):
         values = [('item', 'item_' + p.key) for p in build_purchases if lower <= p.time < upper]
         if values:
             categories.append((name, values))
+    reference = _endgame_reference(route, endgame_route)
+    final = six_slot_items(reference)
+    external = reference is not route and (reference.id != route.id or reference.match_ids != route.match_ids)
+    if final:
+        category = 'Optional six-slot target · other match' if external else 'Six-slot finish · recorded inventory'
+        categories.append((category, [('item', 'item_' + key) for key in final]))
     if not initial and not purchases:
         raise ValueError('This route has no exportable items. Choose another build.')
 
     notes = defaultdict(list)
+    for key in final:
+        notes[key].append('Optional endgame reference: present in the recorded final main inventory; '
+                          'this does not establish a purchase time. ' + _endgame_credit(reference))
+        if external:
+            notes[key].append("This is from another game, not the selected game's purchase order or timings.")
     quantities = {value['key']: value for value in starting_items.details(route)}
     for key, count in initial.items():
-        notes[key].append(f'Starting buy: {count}.' + (' Estimated quantity; adjust if needed.'
-                         if key == 'branches' and starting_items.estimated_branches(route) else ''))
+        notes[key].append(f'Starting buy: {count}.' + (' Minimum recorded quantity; exact count unavailable.'
+                         if starting['unverified'] else ''))
         detail = quantities[key]
         notes[key].append(f"Quantity evidence: {detail['provenance']} ({detail['source']}). {detail['note']}")
     for p in purchases:
@@ -85,22 +116,32 @@ def build_text(route, *, now=None):
                   else clock_text(p.time))
         notes[p.key].append(f'Reference purchase: {timing}.')
     overview = [title(route), 'Local item guide exported by Dota Build Helper.',
-                'Follow items left to right within each section. Hover an item for its recorded timing.',
+                'Follow recorded purchases left to right within the timed sections. Hover an item for its recorded timing.',
                 'Timings are reference points, not deadlines. Buying and switching guides is manual.',
                 f'Source: {route.source}. Match IDs: ' + ', '.join(map(str, route.match_ids))]
     if route.demo:
         overview.append('SYNTHETIC OFFLINE DEMO - not match evidence or build advice.')
-    if route.source == 'STRATZ' and starting_items.correction(route) is None:
-        overview.append('Starting quantities may be incomplete in STRATZ. Edit starting buy in the helper if needed.')
-    if starting_items.estimated_branches(route):
-        overview.append('Starting Iron Branch x2 is estimated, not verified.')
-    overview.extend(route.warnings)
+    else:
+        overview.append('Selected build patch: ' + neutral_patch_label(route) + '.')
+    if final:
+        overview.append('Optional endgame reference. ' + _endgame_credit(reference))
+        if external:
+            overview.append("These six items come from another game, not the selected game's purchase order or timings. "
+                            'They are a possible target, not six additional purchases or an optimal build requirement.')
+            overview.extend('Endgame reference: ' + warning for warning in presentation_warnings(reference))
+        else:
+            overview.append('Six-slot finish is the final inventory of this same game, not six additional purchases or an upgrade order.')
+    if starting['unverified']:
+        overview.append(f'Starting quantities may be incomplete in {route.source}. Edit starting buy in the helper if needed.')
+    if starting['provenance'] == 'recovered':
+        overview.append(starting['note'])
+    overview.extend(presentation_warnings(route))
     if route.skills:
         overview.append('Recorded skill/talent upgrade sequence (not hero levels):\n' +
                         ' → '.join(ability_name(key) for key in route.skills))
     overview.append('Skill level-up prompts are not exported: exact hero levels are unavailable. '
                     'Use the helper overlay for the next upgrade and talent picks.')
-    patch = '' if route.demo else (route.patch_label or (patch_name(route.patch) if route.patch else ''))
+    patch = '' if route.demo else neutral_patch_label(route)
     patch = patch if re.fullmatch(r'\d+\.\d+[a-z]?', patch) else ''
     pairs = [('Hero', hero_key(route)), ('Title', title(route)),
              ('Role', '#DOTA_HeroGuide_Role_Support' if route.role in (4, 5) else '#DOTA_HeroGuide_Role_Core'),
@@ -114,11 +155,11 @@ def build_text(route, *, now=None):
     return '\n'.join(_block('guidedata', pairs)) + '\n'
 
 
-def write_guide(route, path):
+def write_guide(route, path, *, endgame_route=None):
     path = Path(path)
     if path.suffix.lower() != '.build':
         raise ValueError('Save the guide with the .build extension.')
-    content = build_text(route)
+    content = build_text(route, endgame_route=endgame_route)
     path.parent.mkdir(parents=True, exist_ok=True)
     # An interrupted export must not damage an existing guide.
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n',
@@ -133,9 +174,9 @@ def write_guide(route, path):
     return path
 
 
-def fingerprint(route):
+def fingerprint(route, *, endgame_route=None):
     """Stable across export times, but sensitive to quantities and guide contents."""
-    return hashlib.sha256(build_text(route, now=0).encode('utf-8')).hexdigest()
+    return hashlib.sha256(build_text(route, now=0, endgame_route=endgame_route).encode('utf-8')).hexdigest()
 
 
 def file_hash(path):

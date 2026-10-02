@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QApplication
 from dota_helper.app import MainWindow, Overlay
 
 
-def test_talent_picks_are_visible_and_follow_selected_route(tmp_path,monkeypatch):
+def test_talent_badge_replaces_overlay_text_and_follows_selected_route(tmp_path,monkeypatch):
     from dota_helper.providers import Demo
     from dota_helper.catalog import ability_name
     monkeypatch.setattr('dota_helper.app.LOCAL',tmp_path)
@@ -14,14 +14,19 @@ def test_talent_picks_are_visible_and_follow_selected_route(tmp_path,monkeypatch
     window.routes=routes
     window.session.accept_routes(routes)
     window.tick()
-    assert window.overlay.talents.text().count(ability_name(talent))==1
-    assert 'Attributes' not in window.overlay.talents.text()
+    assert window.overlay.talents.isHidden() and not window.overlay.talents.text()
+    window.overlay.skill.grab()
+    assert window.overlay.skill.hitboxes[-1][1].count(ability_name(talent)) == 1
+    assert ability_name(talent) in window.skills.toPlainText()
     window.session.learned[talent]=1
     window.tick()
-    assert 'Done · '+ability_name(talent) in window.overlay.talents.text()
+    assert window.overlay.talents.isHidden()
+    assert (talent, True) in window.overlay.skill.progress
     window.session.choose(routes[1].id)
     window.tick()
-    assert window.overlay.talents.text()=='Talent picks not recorded'
+    assert window.overlay.talents.isHidden() and not window.overlay.talents.text()
+    window.overlay.skill.grab()
+    assert 'Not available from this source' in window.overlay.skill.hitboxes[-1][1]
     window.routes=[]
     window.tick()
     assert window.overlay.talents.isHidden()
@@ -171,7 +176,7 @@ def test_stratz_starting_quantities_survive_same_second_and_display(tmp_path,mon
     window.session.accept_routes([route])
     window.render_routes()
     window.tick()
-    assert 'Iron Branch ×5' in window.match_table.item(0,3).text()
+    assert 'Iron Branch ×5' in window.match_table.item(0,4).text()
     assert 'Iron Branch ×5' in window.overlay.initial_buy.text()
     assert 'Tango ×1' in window.overlay.initial_buy.text()
     window.close()

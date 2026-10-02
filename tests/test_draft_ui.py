@@ -91,3 +91,23 @@ def test_cancel_rejects_late_response(panel):
     widget.stop()
     jobs[0][1](result())
     assert not widget.picks
+
+
+def test_role_refresh_retry_keeps_dates_and_uses_current_role(panel):
+    widget,jobs=panel
+    widget.meta_refresh.click()
+    assert not widget.meta_refresh.isEnabled()
+    jobs[-1][2]('Source unavailable')
+    assert widget.meta_refresh.isEnabled()
+    widget.meta_refresh.click()
+    rows=[dict(hero_id=1,games=200,wins=110,rate=.55)]
+    jobs[-1][1]((rows,'11 Sep–17 Sep 2026 UTC · DELAYED DATA'))
+    assert 'Anti-Mage' in widget.meta_label.toPlainText()
+    widget.meta_refresh.click()
+    jobs[-1][2]('Request timed out')
+    assert widget.meta_rows==rows
+    assert '17 Sep 2026' in widget.meta_status and 'Refresh failed' in widget.meta_status
+    widget.set_role(4)
+    assert not widget.meta_rows
+    assert not widget.meta_data_status
+    assert widget.meta_requested_role==4

@@ -51,3 +51,48 @@ def test_game_draft_sync_and_missing_data_preserves_picks(tmp_path,monkeypatch):
     assert w.draft.enemies[0].currentData()==22
     assert 'unavailable' in w.draft.sync_status.text()
     w.close()
+
+
+def test_delayed_provider_data_is_ranked_with_actual_dates(monkeypatch):
+    from datetime import datetime, timezone
+    now=datetime(2026,10,1,tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr('dota_helper.draft_meta.time.time',lambda:now)
+    class Client:
+        def query(self,*args,**kwargs):
+            return {'heroStats':{'winDay':[
+                dict(heroId=1,day=int(now)-14*86400,winCount=60,matchCount=100),
+                dict(heroId=1,day=int(now)-20*86400,winCount=50,matchCount=100),
+                dict(heroId=1,day=int(now)-21*86400,winCount=100,matchCount=100),
+                dict(heroId=2,day=int(now)+86400,winCount=100,matchCount=100)]}}
+    rows,status=role_meta(4,Client())
+    assert rows==[dict(hero_id=1,games=200,wins=110,rate=.55)]
+    assert 'DELAYED DATA' in status and '14 days behind' in status
+    assert '11 Sep–17 Sep 2026 UTC' in status
+    assert 'Recent' not in status and 'patch unverified' in status
+
+
+def test_ancient_role_statistics_are_not_recommended():
+    class Client:
+        def query(self,*args,**kwargs):
+            return {'heroStats':{'winDay':[
+                dict(heroId=1,day=int(time.time())-31*86400,winCount=60,matchCount=100)]}}
+    with pytest.raises(DataError,match='over 30 days old'):
+        role_meta(4,Client())
+
+
+def test_manual_overlay_choice_shows_role_rankings_without_enemies(tmp_path,monkeypatch):
+    monkeypatch.setattr('dota_helper.app.LOCAL',tmp_path)
+    w=MainWindow(start_services=False)
+    try:
+        w.draft.meta_active=False  # A selected build previously hid draft suggestions.
+        w.draft.meta_rows=[dict(hero_id=1,games=200,wins=110,rate=.55)]
+        w.draft.meta_status='DELAYED DATA · fixture dates'
+        w.draft.overlay_enabled.setChecked(True)
+        w.tick()
+        assert 'TOP WIN RATE' in w.overlay.items.text()
+        assert 'Anti-Mage' in w.overlay.items.text()
+        assert 'DELAYED DATA' in w.overlay.note.text()
+        w.draft.overlay_enabled.setChecked(False)
+        assert w.draft.overlay_text() is None
+    finally:
+        w.close()

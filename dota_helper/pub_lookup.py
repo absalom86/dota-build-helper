@@ -5,7 +5,6 @@ The sample is not D2PT's tracked population and contains no numeric MMR.
 from collections import Counter
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime
 import json
 import time
 import uuid
@@ -15,9 +14,9 @@ from .catalog import HEROES, PATCHES
 from .fast_lookup import DeadlineJobs
 from .models import Purchase, Route
 from .ranking import ranked
+from .recency import RECENT_DAYS, cutoff, in_recent_window
 
-DAYS = 7
-LIMIT = 10
+DAYS = RECENT_DAYS
 
 
 def discovery_query(hero_id):
@@ -28,17 +27,16 @@ def discovery_query(hero_id):
     hero_id = int(hero_id)
     return ("SELECT match_id,start_time,avg_rank_tier,num_rank_tier,lobby_type,"
             "radiant_team,dire_team FROM public_matches "
-            "WHERE start_time >= EXTRACT(EPOCH FROM NOW() - INTERVAL '7 days') "
+            f"WHERE start_time >= EXTRACT(EPOCH FROM NOW() - INTERVAL '{DAYS} days') "
             "AND avg_rank_tier = 80 AND num_rank_tier = 10 AND lobby_type = 7 "
             f"AND (radiant_team @> ARRAY[{hero_id}] OR dire_team @> ARRAY[{hero_id}]) "
-            "ORDER BY start_time DESC, match_id DESC LIMIT 10")
+            "ORDER BY start_time DESC, match_id DESC LIMIT 100")
 
 
 def candidates(data, hero_id, now):
     if not isinstance(data, dict) or not isinstance(data.get("rows"), list) or data.get("err"):
         raise ValueError("Invalid discovery response")
-    minimum = max(now - DAYS * 86400,
-                  datetime.fromisoformat(PATCHES[-1]["date"].replace("Z", "+00:00")).timestamp())
+    minimum = cutoff(now)
     found = {}
     for row in data["rows"]:
         if not isinstance(row, dict):
@@ -55,7 +53,7 @@ def candidates(data, hero_id, now):
                 and row.get("avg_rank_tier") == 80 and row.get("num_rank_tier") == 10
                 and row.get("lobby_type") == 7 and hero_id in teams):
             found[row["match_id"]] = row
-    return sorted(found.values(), key=lambda r: (r["start_time"], r["match_id"]), reverse=True)[:LIMIT]
+    return sorted(found.values(), key=lambda r: (r["start_time"], r["match_id"]), reverse=True)
 
 
 def recent_pubs(client, hero_id, role, progress, cancel, on_update=None, seconds=8):
@@ -76,17 +74,17 @@ def recent_pubs(client, hero_id, role, progress, cancel, on_update=None, seconds
         for row in saved["routes"]:
             row["purchases"] = [Purchase(**p) for p in row["purchases"]]
             route = Route(**row)
-            if (route.hero_id == hero_id and route.role == role and route.patch == PATCHES[-1]["id"]
-                    and now - DAYS * 86400 <= route.start_time <= now):
+            if route.hero_id == hero_id and route.role == role and in_recent_window(route.start_time, now):
                 ready[route.id] = route
-        if ready and saved.get("complete") and now - saved["at"] < 300 and not getattr(client,'force_refresh',False):
-            return ranked(ready.values(), LIMIT), saved["status"] + " Cached; ready immediately."
+        if (ready and saved.get("complete") and saved.get('window_days') == RECENT_DAYS
+                and now - saved["at"] < 300 and not getattr(client,'force_refresh',False)):
+            return ranked(ready.values()), saved["status"] + " Cached; ready immediately."
     except (OSError, ValueError, TypeError, KeyError):
         ready = {}
 
     def publish():
         nonlocal signature
-        routes = ranked(ready.values(), LIMIT)
+        routes = ranked(ready.values())
         current = tuple(r.id for r in routes)
         if routes and on_update and current != signature:
             signature = current
@@ -102,14 +100,13 @@ def recent_pubs(client, hero_id, role, progress, cancel, on_update=None, seconds
             pass
     if client.cached("explorer", params=params, ttl=300) is None:
         discovery = lambda: client.get("explorer", params=params, ttl=300)
-    progress("Recent ranked pubs · last 7 days · 10 recorded Immortal ranks · newest first · 8-second limit")
+    progress(f"Recent ranked pubs · last {DAYS} days · 10 recorded Immortal ranks · newest first · 8-second limit")
 
     def collect(match, row):
         mid = row["match_id"]
         if (not isinstance(match, dict) or match.get("match_id") != mid
-                or match.get("patch") != PATCHES[-1]["id"]
-                or not now - DAYS * 86400 <= match.get("start_time", 0) <= now):
-            outcomes[mid] = "wrong patch/date or match"
+                or not in_recent_window(match.get('start_time'), now)):
+            outcomes[mid] = f"outside {DAYS}-day window or wrong match"
             return
         if match.get("leagueid") or match.get("lobby_type") != 7:
             outcomes[mid] = "not a ranked pub"
@@ -125,6 +122,8 @@ def recent_pubs(client, hero_id, role, progress, cancel, on_update=None, seconds
         if player.get("position_est") != role:
             outcomes[mid] = "different/unknown position"
             return
+        # The discovery row is match-level evidence, even when detail profiles omit ranks.
+        match = dict(match, avg_rank_tier=row['avg_rank_tier'])
         route = normalize(match, player, "OpenDota sampled pub · 10/10 recorded ranks Immortal · numeric MMR unavailable")
         if not route:
             outcomes[mid] = "purchase history unavailable"
@@ -143,9 +142,6 @@ def recent_pubs(client, hero_id, role, progress, cancel, on_update=None, seconds
             if mid in attempted:
                 pending.pop(0)
                 continue
-            if len(attempted) >= LIMIT:
-                pending.clear()
-                break
             cached_match = client.cached(f"matches/{mid}", ttl=86400, allow_stale=True)
             if cached_match:
                 attempted.add(mid)
@@ -185,11 +181,11 @@ def recent_pubs(client, hero_id, role, progress, cancel, on_update=None, seconds
               + (f"Excluded: {exclusions}. " if exclusions else "")
               + "Independent OpenDota sample; D2PT coverage and numeric MMR unavailable.")
     if not routes:
-        status += " No older league-game substitution. You can still import a chosen match ID."
+        status += " No league-game substitution. You can still import a chosen match ID."
     for route in routes:
         route.warnings.extend(w for w in client.stale if w not in route.warnings)
     temp = snapshot.with_suffix(f".{uuid.uuid4().hex}.tmp")
-    temp.write_text(json.dumps({"at": now, "complete": complete, "status": status,
+    temp.write_text(json.dumps({"at": now, "complete": complete, "window_days": RECENT_DAYS, "status": status,
                                 "routes": [asdict(r) for r in routes]}), encoding="utf-8")
     temp.replace(snapshot)
     return routes, status
