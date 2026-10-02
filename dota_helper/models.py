@@ -48,6 +48,7 @@ class Route:
     average_rank: float | None = None
     average_rank_source: str = ''
     average_mmr_source: str = ''
+    starting_items_incomplete: bool = False
 
     def __post_init__(self):
         # Older saved imports may contain IDs unknown to their bundled catalogue.

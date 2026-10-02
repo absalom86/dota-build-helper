@@ -103,6 +103,10 @@ def test_pub_refresh_retains_more_than_ten_eligible_cached_games(tmp_path, monke
     from dataclasses import asdict
     from dota_helper.builds import normalize
     from dota_helper.catalog import PATCHES
+    # Async fixture responses must not become "future" games when the wall
+    # clock crosses a second after recent_pubs captures its eligibility cutoff.
+    fixture_now = time.time()
+    monkeypatch.setattr(time, 'time', lambda: fixture_now)
     client = OpenDota(tmp_path)
     saved = []
     for mid in range(20, 32):

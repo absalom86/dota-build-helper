@@ -1,12 +1,13 @@
 """Optional, cached comparison of one selected game's starting purchase logs.
 
 No requests run during module import or preview. Call verify_selected in a
-background worker with a dedicated OpenDota client. Results never mutate routes
-or accepted starting quantities, even when the providers disagree.
+background worker with a dedicated OpenDota client. Raw comparisons never mutate
+routes or explicit corrections. Compatible quantity evidence can supply a
+separate, labelled starting-buy projection through recoverable_counts.
 """
-from collections import Counter
 from copy import deepcopy
 from functools import lru_cache
+import hashlib
 import json
 import math
 import re
@@ -20,6 +21,7 @@ from .paths import user_data_dir
 _WRITE_LOCK = threading.Lock()
 SUCCESS_TTL = 30 * 86400
 RETRY_TTL = 15 * 60
+QUANTITY_VERSION = 2
 
 
 def _integer(value, *, zero=False):
@@ -55,13 +57,15 @@ def _load(path):
         return {}
 
 
-def _saved(identity):
-    result = _load(user_data_dir() / 'quantity-evidence.json').get(_key(identity))
-    if not isinstance(result, dict) or any(result.get(k) != v for k, v in identity.items()):
+def _validated_result(identity, result):
+    """Validate persisted and freshly returned evidence by the same rules."""
+    if not isinstance(result, dict) or any(result.get(k) != v or type(result.get(k)) is not type(v)
+                                            for k, v in identity.items()):
         return None
     if result.get('status') not in ('verified', 'conflict', 'unavailable'):
         return None
-    if not isinstance(result.get('checked_at'), (int, float)):
+    checked_at = result.get('checked_at')
+    if type(checked_at) not in (int, float) or not math.isfinite(checked_at):
         return None
     recorded = result.get('recorded_counts')
     if not isinstance(recorded, dict) or any(not isinstance(k, str) or type(v) is not int or v <= 0
@@ -80,6 +84,11 @@ def _saved(identity):
     return result
 
 
+def _saved(identity):
+    result = _load(user_data_dir() / 'quantity-evidence.json').get(_key(identity))
+    return _validated_result(identity, result)
+
+
 def get_saved(route):
     """Return a fresh comparison for this exact match/player and original log."""
     identity = _identity(route)
@@ -94,7 +103,84 @@ def get_saved(route):
     from .starting_items import recorded_counts
     if result.get('recorded_counts') != recorded_counts(route):
         return None
+    if result['status'] in ('verified', 'conflict') and result.get('quantity_version') != QUANTITY_VERSION:
+        result = _hydrate_legacy(identity, result)
     return {**deepcopy(result), 'cached': True}
+
+
+def _hydrate_legacy(identity, result):
+    """Recount one old comparison from its raw provider cache, without a request."""
+    cache_key = hashlib.sha256((f"matches/{identity['match_id']}" + '{}').encode()).hexdigest()
+    path = user_data_dir() / 'cache' / f'{cache_key}.json'
+    try:
+        stat = path.stat()
+        response = _raw_cached_match(path, stat.st_mtime_ns, stat.st_size)
+        player, matched_by, error = _matching_player(response.get('data'), identity)
+    except (OSError, ValueError, AttributeError):
+        return result
+    if error:
+        return result
+    from .starting_events import starting_event_counts
+    counts = starting_event_counts(player.get('purchase_log'))
+    if counts is None:
+        return result
+    recorded = result['recorded_counts']
+    differences = {key: {'recorded': recorded.get(key, 0), 'opendota': counts.get(key, 0)}
+                   for key in sorted(set(recorded) | set(counts))
+                   if recorded.get(key, 0) != counts.get(key, 0)}
+    return {**result, 'counts': counts, 'differences': differences,
+            'status': 'conflict' if differences else 'verified', 'matched_by': matched_by,
+            'quantity_version': QUANTITY_VERSION,
+            'message': ('OpenDota records different starting quantities. Review both logs before applying.'
+                        if differences else 'OpenDota agrees with the recorded starting purchases; inventory completeness is not guaranteed.')}
+
+
+@lru_cache(maxsize=16)
+def _raw_cached_match(path, modified_ns, size):
+    # Repeated overlay renders should not reparse an unchanged match response.
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+def recoverable_counts(route, result=None):
+    """Recover compatible quantities for one exact player without editing a route.
+
+    STRATZ can collapse repeated starting buys while OpenDota can represent
+    assembled starting items. Compare complete component multisets so a wand
+    agrees with its stick, two branches and recipe. Different item kinds or
+    fewer observed components require review instead of automatic replacement.
+    """
+    if route.demo or route.source != 'STRATZ':
+        return None
+    identity = _identity(route)
+    if identity is None:
+        return None
+    result = get_saved(route) if result is None else _validated_result(identity, result)
+    if result is None or result['status'] not in ('verified', 'conflict'):
+        return None
+    if result.get('quantity_version') != QUANTITY_VERSION:
+        return None
+    if result.get('source') != 'OpenDota':
+        return None
+    matched_by = result.get('matched_by')
+    if matched_by not in ('account_id', 'player_slot') or identity[matched_by] is None:
+        return None
+    if not 0 <= time.time() - result['checked_at'] < SUCCESS_TTL:
+        return None
+    from .starting_items import recorded_counts
+    recorded = recorded_counts(route)
+    alternate = result['counts']
+    if recorded != result['recorded_counts'] or not recorded:
+        return None
+    if any(key not in ITEMS or count > 30 for values in (recorded, alternate)
+           for key, count in values.items()):
+        return None
+    from .item_recipes import assemble_counts, expanded_counts
+    original_parts = expanded_counts(recorded)
+    alternate_parts = expanded_counts(alternate)
+    if (set(original_parts) != set(alternate_parts)
+            or any(alternate_parts[key] < count for key, count in original_parts.items())):
+        return None
+    return dict(assemble_counts(alternate))
 
 
 def _save(result):
@@ -151,7 +237,8 @@ def verify_selected(route, client, cancel=None, force=False):
     result = {'status': 'skipped', 'message': '', 'counts': None,
               'recorded_counts': recorded_counts(route), 'differences': {}, 'source': 'OpenDota',
               'match_id': None, 'hero_id': route.hero_id, 'account_id': None, 'player_slot': None,
-              'matched_by': '', 'checked_at': time.time(), 'cached': False}
+              'matched_by': '', 'checked_at': time.time(), 'cached': False,
+              'quantity_version': QUANTITY_VERSION}
     if route.demo or route.source != 'STRATZ':
         result['message'] = 'Secondary quantity verification is available for STRATZ match builds.'
         return result
@@ -166,7 +253,8 @@ def verify_selected(route, client, cancel=None, force=False):
         return {**result, 'status': 'cancelled', 'message': 'Quantity verification cancelled.'}
     if not force:
         saved = get_saved(route)
-        if saved is not None:
+        if saved is not None and (saved['status'] == 'unavailable'
+                                  or saved.get('quantity_version') == QUANTITY_VERSION):
             return saved
     if cancel is not None:
         client.cancel = cancel
@@ -188,14 +276,11 @@ def verify_selected(route, client, cancel=None, force=False):
             if not isinstance(log, list) or not log:
                 result.update(status='unavailable', message='OpenDota has no parsed purchase log for the matched player.')
             else:
-                valid = all(isinstance(event, dict) and type(event.get('time')) in (int, float)
-                            and math.isfinite(event['time']) and isinstance(event.get('key'), str)
-                            for event in log)
-                events = [event for event in log if event['time'] < 0] if valid else []
-                if not events or any(event['key'] not in ITEMS for event in events):
+                from .starting_events import starting_event_counts
+                counts = starting_event_counts(log)
+                if counts is None:
                     result.update(status='unavailable', message='OpenDota does not expose usable recorded starting purchases.')
                 else:
-                    counts = dict(Counter(event['key'] for event in events))
                     recorded = result['recorded_counts']
                     differences = {key: {'recorded': recorded.get(key, 0), 'opendota': counts.get(key, 0)}
                                    for key in sorted(set(recorded) | set(counts))

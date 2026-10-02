@@ -26,13 +26,12 @@ OVERLAY_EXCLUDED = frozenset({
 
 
 def starting_buy_text(route):
-    """Count every recorded starting purchase, including same-second repeats."""
-    from .starting_items import counts as starting_counts
-    counts = starting_counts(route)
-    from .starting_items import estimated_branches
-    inferred=estimated_branches(route)
-    return ', '.join(f'{item_name(key)} ×{count}'+(' (estimated)' if key=='branches' and inferred else '')
-                     for key, count in counts.items())
+    """Display assembled starting items, preserving source-backed quantities."""
+    from .starting_items import summary
+    evidence = summary(route)
+    suffix = '+' if evidence['unverified'] else ''
+    return ', '.join(f'{item_name(key)} ×{count}{suffix}'
+                     for key, count in evidence['counts'].items())
 
 
 def overlay_build_purchases(route, second=300):
@@ -99,13 +98,22 @@ def normalize(match, player, evidence):
         return None
     counts = Counter()
     purchases = []
+    starting_incomplete = False
+    from .starting_events import purchase_count
     for event in sorted(log, key=lambda e: e.get("time", 0)):
         key, second = event.get("key"), event.get("time")
         if not isinstance(key, str) or not isinstance(second, (int, float)):
             continue
-        # Keep recipes/components as separate observed events, never inferred completions.
-        counts[key] += 1
-        purchases.append(Purchase(key, int(second), counts[key]))
+        # Initial OpenDota inventory events can contain multiple packs/items in
+        # one stack. Later transaction events always represent one purchase.
+        quantity = purchase_count(event)
+        if quantity is None:
+            quantity = 1
+            starting_incomplete = starting_incomplete or second < 0
+        # Recipe assembly belongs to presentation; keep observed units here.
+        for _ in range(quantity):
+            counts[key] += 1
+            purchases.append(Purchase(key, int(second), counts[key]))
     major = [p for p in purchases if p.time >= 0 and ITEMS.get(p.key, {}).get("cost", 0) >= 1800
              and not p.key.startswith("recipe_")]
     if not purchases or not major:
@@ -127,6 +135,7 @@ def normalize(match, player, evidence):
         match_rank=rank_tier(match.get('avg_rank_tier'), average=True),
         match_rank_source='OpenDota match average' if rank_tier(match.get('avg_rank_tier'), average=True) is not None else '',
         facet=player.get("hero_variant"),
+        starting_items_incomplete=starting_incomplete,
         result=("Won" if (player["player_slot"] < 128) == match["radiant_win"] else "Lost") if isinstance(match.get("radiant_win"), bool) else "Unknown",
         warnings=["Purchase-log timings; courier delivery is not measured.",
                   "Position is estimated by OpenDota. Skill entries are upgrade order, not exact hero levels."],

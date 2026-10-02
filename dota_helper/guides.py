@@ -74,7 +74,8 @@ def _endgame_credit(route):
 
 
 def build_text(route, *, now=None, endgame_route=None):
-    initial = {key: count for key, count in starting_items.counts(route).items() if key in ITEMS}
+    starting = starting_items.summary(route)
+    initial = {key: count for key, count in starting['counts'].items() if key in ITEMS}
     # A saved guide spans the entire match: early sections never expire here.
     sections = overlay_sections(route, second=None, supply_minutes=10)
     build_purchases = sorted(sections['items'] + sections['components'], key=lambda p: p.time)
@@ -106,8 +107,8 @@ def build_text(route, *, now=None, endgame_route=None):
             notes[key].append("This is from another game, not the selected game's purchase order or timings.")
     quantities = {value['key']: value for value in starting_items.details(route)}
     for key, count in initial.items():
-        notes[key].append(f'Starting buy: {count}.' + (' Estimated quantity; adjust if needed.'
-                         if key == 'branches' and starting_items.estimated_branches(route) else ''))
+        notes[key].append(f'Starting buy: {count}.' + (' Minimum recorded quantity; exact count unavailable.'
+                         if starting['unverified'] else ''))
         detail = quantities[key]
         notes[key].append(f"Quantity evidence: {detail['provenance']} ({detail['source']}). {detail['note']}")
     for p in purchases:
@@ -130,10 +131,10 @@ def build_text(route, *, now=None, endgame_route=None):
             overview.extend('Endgame reference: ' + warning for warning in presentation_warnings(reference))
         else:
             overview.append('Six-slot finish is the final inventory of this same game, not six additional purchases or an upgrade order.')
-    if route.source == 'STRATZ' and starting_items.correction(route) is None:
-        overview.append('Starting quantities may be incomplete in STRATZ. Edit starting buy in the helper if needed.')
-    if starting_items.estimated_branches(route):
-        overview.append('Starting Iron Branch x2 is estimated, not verified.')
+    if starting['unverified']:
+        overview.append(f'Starting quantities may be incomplete in {route.source}. Edit starting buy in the helper if needed.')
+    if starting['provenance'] == 'recovered':
+        overview.append(starting['note'])
     overview.extend(presentation_warnings(route))
     if route.skills:
         overview.append('Recorded skill/talent upgrade sequence (not hero levels):\n' +

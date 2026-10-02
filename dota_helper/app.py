@@ -1167,8 +1167,12 @@ class MainWindow(QMainWindow):
         text = ' · '.join(f"{item_name(value['key'])} ×{value['count']} ({value['provenance']})" for value in details)
         from .quantity_evidence import get_saved
         result = self.quantity_results.get(starting_items.key(route)) or get_saved(route)
-        suffix = '\n' + result['message'] if result else ''
-        self.quantity_preview.setText('STARTING BUY · Tango quantities are packs\n' + (text or 'No pregame purchases recorded.') + suffix)
+        starting = starting_items.summary(route)
+        suffix = '' if starting['provenance'] == 'recovered' else '\n' + result['message'] if result else ''
+        heading = ('STARTING BUY · minimum counts · Tango in packs' if starting['unverified'] else
+                   'STARTING BUY · OpenDota quantities · Tango in packs' if starting['provenance'] == 'recovered' else
+                   'STARTING BUY · Tango quantities are packs')
+        self.quantity_preview.setText(heading + '\n' + (text or 'No pregame purchases recorded.') + suffix)
         self.quantity_preview.setToolTip('\n'.join(f"{item_name(value['key'])}: {value['source']}. {value['note']}" for value in details))
         self.refresh_guide_status()
 
@@ -1222,7 +1226,7 @@ class MainWindow(QMainWindow):
         self.launch_worker(lambda _: recover_skills(route, OpenDota(), cancel), finish, lambda _: finish(None))
 
     def verify_starting_quantities(self, interactive=True):
-        from .quantity_evidence import verify_selected
+        from .quantity_evidence import verify_selected, recoverable_counts
         route = self.current_route()
         if route is None or self.quantity_busy:
             return
@@ -1246,7 +1250,8 @@ class MainWindow(QMainWindow):
                 self.schedule_quantity_check()
                 return
             if (interactive and result['status'] == 'conflict' and result.get('counts') is not None
-                    and starting_items.correction(current) is None):
+                    and starting_items.correction(current) is None
+                    and recoverable_counts(current, result) is None):
                 current_text = starting_buy_text(current) or 'No pregame purchases'
                 other_text = ', '.join(f'{item_name(key)} ×{count}' for key, count in result['counts'].items()) or 'No pregame purchases'
                 choice = QMessageBox.question(self, 'Starting purchase logs disagree',
@@ -1260,7 +1265,8 @@ class MainWindow(QMainWindow):
                     except OSError:
                         self.show_error('Could not save the quantity correction.')
                     self.render_routes()
-            self.refresh_quantity_preview()
+            self.render_routes()
+            self.tick()
         def failed(message):
             finish({'status': 'unavailable', 'message': message, 'counts': None})
         self.launch_worker(lambda _: verify_selected(route, OpenDota(), cancel), finish, failed)
@@ -1321,8 +1327,11 @@ class MainWindow(QMainWindow):
             self.route_choice.addItem(f"{display_player} · {route.result} · {route.title}", route.id)
             date = datetime.fromtimestamp(route.start_time, timezone.utc).strftime("%d %b %H:%M") if route.start_time else "Demo"
             starting = starting_buy_text(route) or "Not recorded"
-            if route.source == 'STRATZ' and starting_items.correction(route) is None:
-                starting += ' (recorded counts; may be incomplete)'
+            starting_evidence = starting_items.summary(route)
+            if starting_evidence['unverified']:
+                starting += ' (minimum counts; exact quantities unavailable)'
+            elif starting_evidence['provenance'] == 'recovered':
+                starting += ' (OpenDota quantities)'
             timings = " → ".join(f"{item_name(p.key)} {clock_text(p.time)}" for p in route.purchases if p.time >= 0)
             match_id = route.match_ids[0] if route.match_ids else 'Synthetic'
             player = (f'PRO · {route.player}' if route.tournament or route.pro_player else
@@ -1628,9 +1637,11 @@ class MainWindow(QMainWindow):
             self.overlay.route_label.setText(route_identity(route))
             self.overlay.route_label.setToolTip(f'{route.title}\nMatch: {route.match_ids[0] if route.match_ids else "demo"}'
                                                + ('\nSix-slot finish: ' + six_slot_text(route) if six_slot_items(route) else ''))
-            initial = starting_items.counts(route)
-            initial_text = ("STARTING BUY · saved quantities\n" if starting_items.correction(route) is not None else
-                           "STARTING BUY · counts unverified\n" if route.source == 'STRATZ'
+            starting_evidence = starting_items.summary(route)
+            initial = starting_evidence['counts']
+            initial_text = ("STARTING BUY · saved quantities\n" if starting_evidence['provenance'] == 'corrected' else
+                           "STARTING BUY · OpenDota quantities\n" if starting_evidence['provenance'] == 'recovered' else
+                           "STARTING BUY · counts unverified (+ = at least)\n" if starting_evidence['unverified']
                             else "STARTING BUY\n") + starting_buy_text(route)
             self.overlay.initial_buy.setVisible(bool(initial) and (second is None or second < 60))
             self.overlay.initial_buy.setToolTip(initial_text)

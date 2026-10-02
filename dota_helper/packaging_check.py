@@ -53,6 +53,11 @@ def run(report_path):
             exported = guides.write_guide(route, LOCAL / 'guides' / guides.filename(route))
             assert 'item_black_king_bar' in exported.read_text(encoding='utf-8')
             assert all(value['provenance'] == 'recorded' for value in starting_items.details(route))
+            from .item_recipes import assemble_counts
+            from .starting_events import starting_event_counts
+            assert assemble_counts({'magic_stick': 1, 'branches': 5, 'recipe_magic_wand': 1}) == {
+                'magic_wand': 1, 'branches': 3}
+            assert starting_event_counts([{'key': 'tango', 'time': -89, 'charges': 6}]) == {'tango': 2}
             window.hero.setCurrentIndex(window.hero.findData(invoker.HERO_ID))
             window.tick()
             assert not window.overlay.invoker_spells.isHidden()
@@ -186,7 +191,8 @@ def run(report_path):
                           shop_guide_export=True, endgame_options=3, overlay_fit=True, overlay_scroll=True,
                           separate_overlay_panels=True,
                           skill_icon_strip=True,
-                          quantity_provenance=True, independent_telemetry=True, quick_setup=True, match_rating_columns=True,
+                          quantity_provenance=True, starting_recipe_assembly=True, starting_stack_quantities=True,
+                          independent_telemetry=True, quick_setup=True, match_rating_columns=True,
                           saved_mmr_routes_checked=saved_mmr,
                           credential_available=bool(load_token()),
                           data_directory=str(LOCAL), window_visible=window.isVisible())
